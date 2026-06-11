@@ -62,6 +62,13 @@ set_source_files_properties(${SQLITE3_SOURCE} PROPERTIES
 # ---------------------------------------------------------------------------
 add_library(backend SHARED ${BACKEND_SOURCES})
 
+# Precompiled header — the dominant clean-build cost here is parsing the heavy
+# wx + STL headers once per .cpp (hundreds of TUs). PCH parses them once.
+# Guarded to CXX so the firebird/sqlite .c sources are unaffected. Keep this to
+# ubiquitous, stable headers only (a churny header would invalidate it).
+target_precompile_headers(backend PRIVATE
+    "$<$<COMPILE_LANGUAGE:CXX>:${CMAKE_CURRENT_SOURCE_DIR}/backend_pch.h>")
+
 # ---------------------------------------------------------------------------
 # Include directories
 # ---------------------------------------------------------------------------
