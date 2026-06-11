@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "oes-codegraph": {
+      "command": "/Users/yuriibulakh/.nvm/versions/node/v22.22.0/bin/node",
+      "args": ["tools/codegraph/src/server.js"],
+      "env": {
+        "OES_CG_ROOT": "/Volumes/T9/Web/oes-enterprise",
+        "OES_CG_COMPILE_DIR": "/Volumes/T9/Web/oes-enterprise/build",
+        "OES_CG_DB": "/Volumes/T9/Web/oes-enterprise/tools/codegraph/.cache/codegraph.db"
+      }
+    }
+  }
+}
