@@ -89,3 +89,49 @@ tests/CMakeLists.txt,  tests/test_compiler.cpp,  tests/test_number.cpp
 - codegraph is on develop now — use `cg_callers` / `cg_blast_radius` to check the designer-reorg blast radius before/after each structural resolution.
 - The git-service work is on a separate branch `feature/designer-git` (c6beb708) — independent, land after.
 - Do NOT delete feature/syntax-helper until this merge lands and is verified.
+
+---
+# UPDATE 2026-06-12 — partial execution + the blocking decision
+
+Started the merge on a throwaway `feature/integrate-syntax-helper`, resolved
+22/35 conflicts, then aborted at ONE destructive architectural decision that
+needs the owner's confirmation. Decision log below makes the redo a script.
+
+## The blocker — two complete syntax-helper subsystems collide
+
+The merge pulls TWO full help subsystems (a dir-rename collision, backend AND frontend):
+- **Yurii's** — `backend/help/` + `frontend/help/` (renamed, actively developed)
+- **Upstream's** — `backend/syntaxHelper/` + `frontend/syntaxHelper/` (from the upstream
+  catch-up port f59d62d4; includes `ibHelpService`)
+
+Both define `class BACKEND_API ibHelpCorpus final` (same file, line 47) → duplicate
+symbols, the link fails until ONE is removed. `ibHelpService` (upstream-only) is
+referenced only in appData.cpp/.h.
+
+**DECISION NEEDED:** keep Yurii's `help/`, DELETE upstream's `syntaxHelper/`
+(backend + frontend, ~20 files)? Inference = yes (he is actively extending his own —
+"методы из справочников"), but it removes a whole upstream subsystem, so confirm.
+If upstream's syntax-helper has anything worth keeping, port it into `help/` first.
+
+## Decision log (22 resolved — re-appliable next session)
+
+- docs/syntax-helper-design.md → theirs
+- tests/test_compiler.cpp → ours (+ add `#include <wx/debug.h>`); tests/test_number.cpp → theirs
+- tests/CMakeLists.txt → union (develop query suites + syntax-helper plugin suites; keep OES_TESTING + OpenSSL block)
+- designer/mainFrameDesignerCmd.cpp, mainFrameDesignerMenu.cpp → accept delete (reorg into designer/mainFrame/)
+- CMakeLists.txt (root) → add dumpHelp only (classChecker absent in merged tree; don't double-add)
+- backend/CMakeLists.txt → keep develop PCH; help-staging hunk → theirs (data/help)
+- backend.vcxproj, .filters, frontend.vcxproj → theirs  [FOLLOW-UP: re-add develop's query-engine sources to vcxproj for Windows MSBuild]
+- backend/metaCollection/partial/{catalog,accumulationRegister,informationRegister,document}Object.cpp + catalogManager_impl.cpp → ours (develop Phase-B base-class refactor; theirs is pre-refactor inline)
+- backend/session/session.cpp → ours (GetSessionRegistry null-tolerant)
+- backend/compiler/cache/byteCodeCache.cpp → ours (query-engine ibQueryIR)
+- backend/system/systemManager.cpp → theirs (syntax-helper corpus, m_methodHelper, fuller)
+- backend/backend_exception.{cpp,h} → ours (record-locks ibBackendLockException)
+- simplePlugin/simplePluginDLL.cpp → theirs (plugin domain)
+
+## Remaining 13 (after the help decision)
+
+- backend/appData.{cpp,h} → theirs for help member/init (helpCorpus + RebuildHelpCorpus), KEEP develop's m_activeMetaData + lock/logger includes (hand-merge, not whole-file)
+- backend/compiler/procUnit.cpp (3 hunks) — core hand-merge (develop VM specializations + theirs additions)
+- designer/mainFrame/* (6) + frontend/{docView/docView, mainFrame/mainFrame.h, visualView/ctrl/formObject, win/editor/codeEditor/codeEditor} (4) — keep theirs' AI-assistant/help features BUT apply develop's doc/view-fork type renames (wxView→ibView, CAuiDocChildFrame→ibAuiDocChildFrame) which pervade the merged frontend; theirs predates the fork, so any old-type usage in a kept hunk must be renamed or it won't compile.
+- Then: rm the losing help dir, full build -j2 (PCH on; expect macOS/Clang portability fixes — the syntax-helper track was MSVC-developed), oes_tests, land.
