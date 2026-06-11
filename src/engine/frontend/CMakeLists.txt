@@ -46,6 +46,8 @@ target_link_libraries(frontend
         wx::base
         wx::net
         wx::xml
+        wx::webview
+        md4c-html        # vendored CommonMark→HTML renderer
 )
 
 set_target_properties(frontend PROPERTIES

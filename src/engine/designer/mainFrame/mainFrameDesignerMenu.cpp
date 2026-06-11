@@ -4,12 +4,29 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "mainFrameDesigner.h"
+#include "backend/appData.h"
+#include "backend/plugin/pluginManager.h"
+#include "backend/plugin/metaBridge.h"
+#include "backend/plugin/byokEnv.h"
+
+#include "mainFrame/pluginManagerDialog.h"
+#include "mainFrame/templateWizard.h"
+
+#include <wx/stdpaths.h>
+#include <wx/filename.h>
+#include <wx/msgdlg.h>
+#include <wx/sizer.h>
+#include <wx/stattext.h>
+#include <wx/textctrl.h>
+#include <wx/button.h>
+#include <wx/clipbrd.h>
+#include <wx/dataobj.h>
 
 //********************************************************************************
 //*                                Hotkey support                                *
 //********************************************************************************
 
-void ibFrontendMainFrameDesigner::SetDefaultHotKeys()
+void ibFrontendDocMDIFrameDesigner::SetDefaultHotKeys()
 {
 	// Setup the hotkeys.
 	m_keyBinder.SetShortcut(wxID_NEW, wxT("Ctrl+N"));
@@ -38,13 +55,24 @@ void ibFrontendMainFrameDesigner::SetDefaultHotKeys()
 	// ibKeyBinder strips the accelerator labels during LoadOptions.
 	m_keyBinder.SetShortcut(wxID_FRONTEND_SYNTAX_HELPER,        wxT("RawCtrl+Alt+F1"));
 	m_keyBinder.SetShortcut(wxID_FRONTEND_SYNTAX_HELPER_LOOKUP, wxT("RawCtrl+F1"));
+
+	// Default plugin-driven AI chat pane toggle. RawCtrl for the same
+	// macOS-vs-Cmd reason as the Syntax Helper entries above.
+	m_keyBinder.SetShortcut(wxID_FRONTEND_PLUGIN_WEB_PANE,      wxT("RawCtrl+Alt+I"));
+
+	// Project Search panel (Workmate parity). Ctrl+Shift+F so it lives
+	// next to wxID_FIND (Ctrl+F) without colliding with the editor's
+	// own document-scope find dialog. RawCtrl keeps the literal Control
+	// key on macOS — Cmd+F is the system find pattern and we don't want
+	// to steal it.
+	m_keyBinder.SetShortcut(wxID_DESIGNER_PROJECT_SEARCH,      wxT("RawCtrl+Shift+F"));
 }
 
 //********************************************************************************
 //*                                Default menu                                  *
 //********************************************************************************
 
-enum WINDOW_MENU_ID
+enum MDI_MENU_ID
 {
 	wxWINDOWCLOSE = 4001,
 	wxWINDOWCLOSEALL,
@@ -57,7 +85,132 @@ enum WINDOW_MENU_ID
 
 #include "frontend/artProvider/artProvider.h"
 
-void ibFrontendMainFrameDesigner::InitializeDefaultMenu()
+namespace {
+
+wxString ShellQuote(const wxString& value)
+{
+	wxString out = value;
+	out.Replace(wxT("'"), wxT("'\\''"));
+	return wxT("'") + out + wxT("'");
+}
+
+wxString ResolveOesMcpPath()
+{
+	wxFileName exe(wxStandardPaths::Get().GetExecutablePath());
+	wxString dir = exe.GetPath();
+	for (int i = 0; i < 10; ++i) {
+		wxFileName candidate(dir, wxT("oes-mcp"));
+		if (wxFileExists(candidate.GetFullPath())) {
+			return candidate.GetFullPath();
+		}
+		wxFileName up = wxFileName::DirName(dir);
+		if (up.GetDirCount() == 0) break;
+		up.RemoveLastDir();
+		const wxString parent = up.GetPath();
+		if (parent.IsEmpty() || parent == dir) break;
+		dir = parent;
+	}
+	return wxT("oes-mcp");
+}
+
+bool CopyTextToClipboard(const wxString& text)
+{
+	if (!wxTheClipboard->Open()) return false;
+	wxTheClipboard->SetData(new wxTextDataObject(text));
+	wxTheClipboard->Close();
+	return true;
+}
+
+class ibAiOnboardingDialog final : public wxDialog {
+public:
+	ibAiOnboardingDialog(wxWindow* parent)
+	    : wxDialog(parent, wxID_ANY, _("Подключить AI"),
+	               wxDefaultPosition, wxSize(760, 520),
+	               wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER)
+	{
+		const wxString configDir = appData ? appData->GetFileDirectory() : wxString();
+		const wxString mcpPath   = ResolveOesMcpPath();
+		const wxString envPath   = byokEnv::GetEnvFilePath("aiBridge");
+		const wxString mcpCommand =
+		    wxT("claude mcp add oes --transport=stdio --command ") +
+		    ShellQuote(mcpPath) +
+		    (configDir.IsEmpty()
+		        ? wxString()
+		        : wxT(" --args ") + ShellQuote(configDir));
+
+		auto* root = new wxBoxSizer(wxVERTICAL);
+		auto* intro = new wxStaticText(this, wxID_ANY,
+		    _("Проверка подключения Designer к локальному MCP и расширениям."));
+		wxFont titleFont = intro->GetFont();
+		titleFont.MakeBold();
+		intro->SetFont(titleFont);
+		root->Add(intro, 0, wxEXPAND | wxALL, FromDIP(8));
+
+		auto* details = new wxTextCtrl(this, wxID_ANY, wxEmptyString,
+		                               wxDefaultPosition, wxDefaultSize,
+		                               wxTE_MULTILINE | wxTE_READONLY |
+		                               wxTE_DONTWRAP | wxHSCROLL);
+		wxFont mono = details->GetFont();
+		mono.SetFamily(wxFONTFAMILY_TELETYPE);
+		details->SetFont(mono);
+
+		wxString body;
+		body << "1. Claude Code MCP command\n"
+		     << mcpCommand << "\n\n"
+		     << "2. Plugin env file\n"
+		     << envPath << "\n\n"
+		     << "Expected keys:\n"
+		     << "TOKEN=<provider-token>\n"
+		     << "ENDPOINT=<provider-endpoint>\n"
+		     << "LOCALE=uk-UA\n"
+		     << "OES_TEMPLATE_PROVIDER=1\n"
+		     << "OES_TEMPLATE_ENDPOINT=<provider-template-endpoint>\n"
+		     << "OES_TEMPLATE_TOKEN=<provider-token>\n"
+		     << "OES_TEMPLATE_TENANT=<tenant-id optional>\n"
+		     << "OES_TEMPLATE_LOCALE=uk-UA\n\n"
+		     << "3. Smoke prompt\n"
+		     << "Open Tools -> AI Assistant and send: ты кто?\n\n"
+		     << "4. Demo object prompt\n"
+		     << "/agent Створи довідник Контрагенти з полями Назва, ЄДРПОУ, Телефон";
+		details->SetValue(body);
+		root->Add(details, 1, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(8));
+
+		auto* buttons = new wxBoxSizer(wxHORIZONTAL);
+		auto* copyCmd = new wxButton(this, wxID_ANY, _("Копировать MCP команду"));
+		auto* copyEnv = new wxButton(this, wxID_ANY, _("Копировать путь env"));
+		auto* plugins = new wxButton(this, wxID_ANY, _("Открыть Plugins"));
+		auto* close   = new wxButton(this, wxID_CLOSE, _("Закрыть"));
+		buttons->Add(copyCmd, 0, wxRIGHT, FromDIP(4));
+		buttons->Add(copyEnv, 0, wxRIGHT, FromDIP(4));
+		buttons->Add(plugins, 0, wxRIGHT, FromDIP(4));
+		buttons->AddStretchSpacer(1);
+		buttons->Add(close, 0);
+		root->Add(buttons, 0, wxEXPAND | wxLEFT | wxRIGHT | wxBOTTOM, FromDIP(8));
+		SetSizer(root);
+
+		copyCmd->Bind(wxEVT_BUTTON, [this, mcpCommand](wxCommandEvent&) {
+			if (CopyTextToClipboard(mcpCommand)) {
+				wxMessageBox(_("MCP команда скопирована."), _("Подключить AI"),
+				             wxOK | wxICON_INFORMATION, this);
+			}
+		});
+		copyEnv->Bind(wxEVT_BUTTON, [this, envPath](wxCommandEvent&) {
+			if (CopyTextToClipboard(envPath)) {
+				wxMessageBox(_("Путь env скопирован."), _("Подключить AI"),
+				             wxOK | wxICON_INFORMATION, this);
+			}
+		});
+		plugins->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) {
+			ibPluginManagerDialog dlg(this);
+			dlg.ShowModal();
+		});
+		close->Bind(wxEVT_BUTTON, [this](wxCommandEvent&) { EndModal(wxID_CLOSE); });
+	}
+};
+
+} // namespace
+
+void ibFrontendDocMDIFrameDesigner::InitializeDefaultMenu()
 {
 	m_frameMenuBar = new wxMenuBar;
 
@@ -65,6 +218,12 @@ void ibFrontendMainFrameDesigner::InitializeDefaultMenu()
 	m_menuFile = new wxMenu();
 
 	m_menuFile->Append(wxID_NEW);
+	// Flagship "голое решение из коробки" — opens the template wizard
+	// (gallery → preview → customize → apply via metaBridge mutations).
+	// Placed before Open so it sits in the user's first natural scan of
+	// the File menu when starting a new project.
+	m_menuFile->Append(wxID_DESIGNER_TEMPLATE_WIZARD,
+	                    _("Новая конфигурация из шаблона…"));
 	m_menuFile->Append(wxID_OPEN);
 
 	m_menuFile->Append(wxID_CLOSE);
@@ -100,6 +259,19 @@ void ibFrontendMainFrameDesigner::InitializeDefaultMenu()
 	m_menuEdit->Append(wxID_SELECTALL);
 	m_menuEdit->AppendSeparator();
 	m_menuEdit->Append(wxID_FIND);
+	// Workmate-parity "Project Search by metadata". Ctrl+Shift+F so it
+	// doesn't collide with the editor's wxID_FIND (Ctrl+F) — the latter
+	// scopes the current document, this one scopes the configuration.
+	m_menuEdit->Append(wxID_DESIGNER_PROJECT_SEARCH,
+	                    _("Поиск по метаданным…\tRawCtrl+Shift+F"));
+
+	// Workmate-parity AI Assistant panes — TODO list and aggregated
+	// Markers. No keyboard shortcut by default; users open them via
+	// the Edit menu like other dockable views.
+	m_menuEdit->Append(wxID_DESIGNER_AI_TODO,
+	                    _("Задачи AI-ассистента"));
+	m_menuEdit->Append(wxID_DESIGNER_AI_MARKERS,
+	                    _("Маркеры AI-ассистента"));
 
 	m_frameMenuBar->Append(m_menuEdit, wxGetStockLabel(wxID_EDIT));
 
@@ -152,24 +324,6 @@ void ibFrontendMainFrameDesigner::InitializeDefaultMenu()
 	menuItem = m_menuConfiguration->Append(wxID_DESIGNER_CONFIGURATION_SAVE_TO_FILE, _("Save configuration"));
 	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
 
-	m_menuConfiguration->AppendSeparator();
-
-	// "Compare configurations" submenu — three entry points (file / DB
-	// baseline / two arbitrary files) grouped together so the parent
-	// Configuration menu stays compact.
-	wxMenu* menuCompare = new wxMenu;
-
-	menuItem = menuCompare->Append(wxID_DESIGNER_CONFIGURATION_COMPARE_FILE, _("With file..."));
-	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
-
-	menuItem = menuCompare->Append(wxID_DESIGNER_CONFIGURATION_COMPARE_DB, _("With database configuration"));
-	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
-
-	menuItem = menuCompare->Append(wxID_DESIGNER_CONFIGURATION_COMPARE_TWO_FILES, _("Two files..."));
-	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
-
-	m_menuConfiguration->AppendSubMenu(menuCompare, _("Compare configurations"));
-
 	m_frameMenuBar->Append(m_menuConfiguration, _("Configuration"));
 	m_frameMenuBar->Append(m_menuDebug, _("Debug"));
 
@@ -178,9 +332,6 @@ void ibFrontendMainFrameDesigner::InitializeDefaultMenu()
 	menuItem = m_menuAdministration->Append(wxID_APPLICATION_USERS, _("Users"));
 	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
 	menuItem = m_menuAdministration->Append(wxID_APPLICATION_ACTIVE_USERS, _("Active users"));
-	menuItem->Enable(activeMetaData->AccessRight_ActiveUsers());
-	m_menuAdministration->AppendSeparator();
-	menuItem = m_menuAdministration->Append(wxID_APPLICATION_AUDIT_LOG, _("Registration journal"));
 	menuItem->Enable(activeMetaData->AccessRight_ActiveUsers());
 	m_menuAdministration->AppendSeparator();
 	menuItem = m_menuAdministration->Append(wxID_DESIGNER_DATABASE_LOAD_FROM_FILE, _("Restore database"));
@@ -197,55 +348,229 @@ void ibFrontendMainFrameDesigner::InitializeDefaultMenu()
 	m_frameMenuBar->Append(m_menuSetting, _("Tools"));
 	m_menuSetting->Append(wxID_APPLICATION_SETTING, _("Options..."));
 
+	// Syntax helper items in Tools, NOT Help — macOS wxWidgets routes
+	// the Help menu through the system-native Help search which eats
+	// custom command bindings. RawCtrl forces the literal Control key
+	// on every platform (wxWidgets maps "Ctrl" to Cmd on macOS).
+	m_menuSetting->AppendSeparator();
+	m_menuSetting->Append(wxID_FRONTEND_SYNTAX_HELPER,
+	                       _("Syntax Helper\tRawCtrl+Alt+F1"));
+	m_menuSetting->Append(wxID_FRONTEND_SYNTAX_HELPER_LOOKUP,
+	                       _("Look up in Syntax Helper\tRawCtrl+F1"));
+	m_menuSetting->Append(wxID_DESIGNER_AI_ONBOARDING,
+	                       _("Подключить AI…"));
+	m_menuSetting->Append(wxID_FRONTEND_PLUGIN_WEB_PANE,
+	                       _("AI Assistant\tRawCtrl+Alt+I"));
+	m_menuSetting->Append(wxID_FRONTEND_PLUGIN_MANAGER,
+	                       _("Plugins…"));
+
+	// Plugin-supplied menu items live under Tools → Plugins. Built from
+	// the plugin manager's RegisteredMenuItem table. Each click routes
+	// through CallMenuHandler so the plugin's callback runs inside a
+	// host-managed ibPluginCallScope.
+	if (auto* pm = appData->GetPluginManager()) {
+		const auto& items = pm->MenuItems();
+		if (!items.empty()) {
+			auto* pluginsMenu = new wxMenu;
+			constexpr int kPluginIdBase = wxID_HIGHEST + 6000;
+			int slot = 0;
+			for (const auto& item : items) {
+				const int id = kPluginIdBase + slot++;
+				pluginsMenu->Append(id,
+				    wxString::FromUTF8(item.m_label.c_str()));
+				Bind(wxEVT_MENU,
+				     [pm, &item](wxCommandEvent&) {
+				         pm->CallMenuHandler(item);
+				     },
+				     id);
+			}
+			m_menuSetting->AppendSeparator();
+			m_menuSetting->AppendSubMenu(pluginsMenu, _("Plugins"));
+		}
+	}
+
 	m_menuHelp = new wxMenu;
-	// Syntax helper pane toggle. Cursor look-up has no menu entry —
-	// the editor's right-click context menu and the RawCtrl+F1
-	// accelerator (m_keyBinder) cover that path; a second top-level
-	// menu surface for the same action just confuses the menubar.
-	// RawCtrl forces the literal Control key on every platform
-	// (wxWidgets maps "Ctrl" to Cmd on macOS). NB: on macOS the Help
-	// menu can be intercepted by the system-native Help search; if
-	// that surfaces as a real problem this can move to Tools (Windows
-	// is the primary platform now).
-	m_menuHelp->Append(wxID_FRONTEND_SYNTAX_HELPER,
-	                   _("Syntax Helper\tRawCtrl+Alt+F1"));
-	m_menuHelp->AppendSeparator();
 	m_menuHelp->Append(wxID_DESIGNER_ABOUT, _("About"));
 	m_frameMenuBar->Append(m_menuHelp, wxGetStockLabel(wxID_HELP, wxSTOCK_NOFLAGS));
 
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnOpenConfiguration, this, wxID_DESIGNER_CONFIGURATION_OPEN_DATABASE);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnRollbackConfiguration, this, wxID_DESIGNER_CONFIGURATION_ROLLBACK_DATABASE);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnUpdateConfiguration, this, wxID_DESIGNER_CONFIGURATION_UPDATE_DATABASE);
+	// Ctrl+Z hook for agent mutations. Tried BEFORE wxDocument's default
+	// undo routing so "Ctrl+Z reverts whole agent turn" (Phase 3.4 spec)
+	// works at the configuration level. When the agent undo stack is
+	// empty we Skip() so the focused editor's command processor handles
+	// it the normal wxWidgets way (form/module editor undo).
+	Bind(wxEVT_MENU,
+	     [](wxCommandEvent& evt) {
+	         if (metaBridge::UndoLastAgentMutation() != 0) {
+	             evt.Skip();   // empty stack → fall through to editor undo
+	         }
+	     },
+	     wxID_UNDO);
 
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnConfiguration, this, wxID_DESIGNER_CONFIGURATION_LOAD_FROM_FILE, wxID_DESIGNER_CONFIGURATION_COMPARE_TWO_FILES);
+	// Tools → Plugins — Phase 4.3 settings dialog. Read/write of
+	// plugins.json5 + BYOK env files lives entirely inside the dialog;
+	// the menu handler is a thin show-modal shim.
+	Bind(wxEVT_MENU,
+	     [this](wxCommandEvent&) {
+	         ibPluginManagerDialog dlg(this);
+	         dlg.ShowModal();
+	     },
+	     wxID_FRONTEND_PLUGIN_MANAGER);
 
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnStartDebug, this, wxID_DESIGNER_DEBUG_START);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnStartDebugWithoutDebug, this, wxID_DESIGNER_DEBUG_START_WITHOUT_DEBUGGING);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnStartDebugWeb, this, wxID_DESIGNER_DEBUG_START_WEB);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnStartDebugWithoutDebugWeb, this, wxID_DESIGNER_DEBUG_START_WITHOUT_DEBUGGING_WEB);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnAttachForDebugging, this, wxID_DESIGNER_DEBUG_ATTACH_FOR_DEBUGGING);
+	// File → Новая конфигурация из шаблона… — opens the flagship template
+	// wizard. The wizard is a modal wxDialog so the menu handler is a
+	// one-liner static helper; all the gallery/preview/customize/apply
+	// state lives inside the dialog itself.
+	Bind(wxEVT_MENU,
+	     [this](wxCommandEvent&) { ibTemplateWizard::Run(this); },
+	     wxID_DESIGNER_TEMPLATE_WIZARD);
 
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnRunDebugCommand, this, wxID_DESIGNER_DEBUG_EDIT_POINT, wxID_DESIGNER_DEBUG_REMOVE_ALL_DEBUGPOINTS);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnToolsSettings, this, wxID_APPLICATION_SETTING);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnUsers, this, wxID_APPLICATION_USERS);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnActiveUsers, this, wxID_APPLICATION_ACTIVE_USERS);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnAuditLog, this, wxID_APPLICATION_AUDIT_LOG);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnConnection, this, wxID_APPLICATION_CONNECTION);
-
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnLoadDatabase, this, wxID_DESIGNER_DATABASE_LOAD_FROM_FILE);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnSaveDatabase, this, wxID_DESIGNER_DATABASE_SAVE_TO_FILE);
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnClearDatabase, this, wxID_DESIGNER_DATABASE_CLEAR);
-
-	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnAbout, this, wxID_DESIGNER_ABOUT);
-
-	// Syntax helper — lambda bindings, no member fn to lose to the
-	// designer header.
 	Bind(wxEVT_MENU,
 	     [this](wxCommandEvent&) { ToggleHelpPane(); },
 	     wxID_FRONTEND_SYNTAX_HELPER);
 	Bind(wxEVT_MENU,
 	     [this](wxCommandEvent&) { OpenHelpForCursor(); },
 	     wxID_FRONTEND_SYNTAX_HELPER_LOOKUP);
+	Bind(wxEVT_MENU,
+	     [this](wxCommandEvent&) {
+	         ibAiOnboardingDialog dlg(this);
+	         dlg.ShowModal();
+	     },
+	     wxID_DESIGNER_AI_ONBOARDING);
+
+	// Workmate-parity Project Search by metadata. Ensures the pane,
+	// raises it, focuses the query input — same UX shape as the
+	// Syntax Helper "open and ready to type" pattern.
+	Bind(wxEVT_MENU,
+	     [this](wxCommandEvent&) { FocusProjectSearchPane(); },
+	     wxID_DESIGNER_PROJECT_SEARCH);
+
+	// Workmate-parity AI Assistant panes — TODO list and aggregated
+	// Markers. Toggle on each invocation so a second click hides
+	// the panel; the same pattern Syntax Helper uses.
+	Bind(wxEVT_MENU,
+	     [this](wxCommandEvent&) { ToggleAiTodoPane(); },
+	     wxID_DESIGNER_AI_TODO);
+	Bind(wxEVT_MENU,
+	     [this](wxCommandEvent&) { ToggleAiMarkersPane(); },
+	     wxID_DESIGNER_AI_MARKERS);
+	Bind(wxEVT_MENU,
+	     [this](wxCommandEvent&) {
+	         WirePluginWebPaneCallbacks();
+	         auto* pm = appData->GetPluginManager();
+	         if (pm == nullptr) return;
+
+	         // Show the first registered plugin pane that is still live
+	         // (the user may have closed an earlier one — skip stale ids).
+	         for (const wxString& paneId : m_pluginWebPaneOrder) {
+	             if (m_mgr.GetPane(paneId).IsOk()) {
+	                 pm->CallWebPaneShow(paneId);
+	                 return;
+	             }
+	         }
+	         // No plugin registered a WebView pane.
+	         // Fall back to the built-in demo pane so the user can verify
+	         // the WebView infrastructure end-to-end. The sample HTML
+	         // ships next to the executable under assets/pluginWebPane/.
+	         // Look for assets/pluginWebPane/sample.html. Production install
+	         // places it under wxStandardPaths Resources; dev builds keep
+	         // it in the repo root several dirs above the .app bundle
+	         // (build/bin/Debug/designer.app/Contents/MacOS/). Walk UP the
+	         // executable directory until we find a sibling `assets/` dir
+	         // containing the bundle.
+	         const wxString rel = wxT("assets") + wxString(wxFILE_SEP_PATH)
+	             + wxT("pluginWebPane") + wxString(wxFILE_SEP_PATH)
+	             + wxT("sample.html");
+	         wxString resolvedPath = wxStandardPaths::Get().GetResourcesDir()
+	             + wxFILE_SEP_PATH + rel;
+	         if (!wxFileExists(resolvedPath)) {
+	             wxString dir = wxFileName(
+	                 wxStandardPaths::Get().GetExecutablePath()).GetPath();
+	             for (int i = 0; i < 12; ++i) {
+	                 const wxString candidate = dir + wxFILE_SEP_PATH + rel;
+	                 if (wxFileExists(candidate)) {
+	                     resolvedPath = candidate;
+	                     break;
+	                 }
+	                 wxFileName up = wxFileName::DirName(dir);
+	                 if (up.GetDirCount() == 0) break; // at filesystem root
+	                 up.RemoveLastDir();
+	                 const wxString parent = up.GetPath();
+	                 if (parent.IsEmpty() || parent == dir) break;
+	                 dir = parent;
+	             }
+	         }
+	         wxLogDebug(wxT("AI Chat sample.html resolved -> %s (exists=%d)"),
+	                    resolvedPath, (int)wxFileExists(resolvedPath));
+	         if (!wxFileExists(resolvedPath)) {
+	             wxMessageBox(_("AI Chat: sample HTML bundle not found.\n"
+	                             "Install a v4 plugin via Tools → Plugins."),
+	                          _("AI Assistant"), wxICON_INFORMATION, this);
+	             return;
+	         }
+	         const int rc = pm->CallWebPaneRegister(
+	             wxT("designer.demo.chat"),
+	             _("AI Assistant"),
+	             resolvedPath,
+	             /*onMessage*/ nullptr,
+	             /*userData*/  nullptr);
+	         if (rc == 0) {
+	             pm->CallWebPaneShow(wxT("designer.demo.chat"));
+	         }
+	     },
+	     wxID_FRONTEND_PLUGIN_WEB_PANE);
+
+	// Editor context-menu items use frontend-shared command ids
+	// (frontend.dll cannot depend on the downstream designer header).
+	// Forward the three frontend debug ids to the equivalent designer
+	// ids that OnRunDebugCommand handles.
+	auto forwardDebugId = [this](int designerId) {
+		return [this, designerId](wxCommandEvent&) {
+			wxCommandEvent ev(wxEVT_MENU, designerId);
+			ev.SetEventObject(this);
+			ProcessWindowEvent(ev);
+		};
+	};
+	Bind(wxEVT_MENU, forwardDebugId(wxID_DESIGNER_DEBUG_STEP_INTO),
+	     wxID_FRONTEND_DEBUG_STEP_INTO);
+	Bind(wxEVT_MENU, forwardDebugId(wxID_DESIGNER_DEBUG_STEP_OVER),
+	     wxID_FRONTEND_DEBUG_STEP_OVER);
+	Bind(wxEVT_MENU, forwardDebugId(wxID_DESIGNER_DEBUG_REMOVE_ALL_DEBUGPOINTS),
+	     wxID_FRONTEND_DEBUG_REMOVE_ALL_BREAKPOINTS);
+
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnOpenConfiguration, this, wxID_DESIGNER_CONFIGURATION_OPEN_DATABASE);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnRollbackConfiguration, this, wxID_DESIGNER_CONFIGURATION_ROLLBACK_DATABASE);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnUpdateConfiguration, this, wxID_DESIGNER_CONFIGURATION_UPDATE_DATABASE);
+
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnConfiguration, this, wxID_DESIGNER_CONFIGURATION_LOAD_FROM_FILE, wxID_DESIGNER_CONFIGURATION_SAVE_TO_FILE);
+
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnStartDebug, this, wxID_DESIGNER_DEBUG_START);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnStartDebugWithoutDebug, this, wxID_DESIGNER_DEBUG_START_WITHOUT_DEBUGGING);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnStartDebugWeb, this, wxID_DESIGNER_DEBUG_START_WEB);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnStartDebugWithoutDebugWeb, this, wxID_DESIGNER_DEBUG_START_WITHOUT_DEBUGGING_WEB);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnAttachForDebugging, this, wxID_DESIGNER_DEBUG_ATTACH_FOR_DEBUGGING);
+
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnRunDebugCommand, this, wxID_DESIGNER_DEBUG_EDIT_POINT, wxID_DESIGNER_DEBUG_REMOVE_ALL_DEBUGPOINTS);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnToolsSettings, this, wxID_APPLICATION_SETTING);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnUsers, this, wxID_APPLICATION_USERS);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnActiveUsers, this, wxID_APPLICATION_ACTIVE_USERS);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnConnection, this, wxID_APPLICATION_CONNECTION);
+
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnLoadDatabase, this, wxID_DESIGNER_DATABASE_LOAD_FROM_FILE);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnSaveDatabase, this, wxID_DESIGNER_DATABASE_SAVE_TO_FILE);
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnClearDatabase, this, wxID_DESIGNER_DATABASE_CLEAR);
+
+	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnAbout, this, wxID_DESIGNER_ABOUT);
 
 	LoadOptions();
+
+	// Wire plugin-WebView pane callbacks now that the plugin manager is
+	// alive and the designer frame exists. Plugins loaded BEFORE the
+	// frame existed (the normal startup order — appData->LoadAll fires
+	// during ibApplicationData ctor) had their RegisterWebPane calls
+	// buffered inside ibPluginManager; WirePluginWebPaneCallbacks installs
+	// the lambdas and then calls ReplayPendingWebPaneRegistrations to
+	// drain the buffer. The method early-returns on duplicate calls so
+	// the on-menu invocation in the wxID_FRONTEND_PLUGIN_WEB_PANE handler
+	// stays a no-op afterwards.
+	WirePluginWebPaneCallbacks();
 }

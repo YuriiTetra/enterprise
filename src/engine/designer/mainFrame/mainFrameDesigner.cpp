@@ -4,7 +4,9 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "mainFrameDesigner.h"
+#include "frontend/help/helpPaneView.h"
 #include "backend/debugger/debugClient.h"
+#include "backend/appData.h"
 
 #include <wx/config.h>
 #include <wx/fileconf.h>
@@ -13,14 +15,15 @@
 
 #include "docManager/docManager.h"
 #include "debugger/debugClientImpl.h"
+#include "externalMutationNotifier.h"
 
 ///////////////////////////////////////////////////////////////////
 
-ibFrontendMainFrameDesigner* ibFrontendMainFrameDesigner::GetFrame() {
-	ibFrontendMainFrame* instance = ibFrontendMainFrame::GetFrame();
+ibFrontendDocMDIFrameDesigner* ibFrontendDocMDIFrameDesigner::GetFrame() {
+	ibFrontendDocMDIFrame* instance = ibFrontendDocMDIFrame::GetFrame();
 	if (instance != nullptr) {
-		ibFrontendMainFrameDesigner* designer_instance =
-			dynamic_cast<ibFrontendMainFrameDesigner*>(instance);
+		ibFrontendDocMDIFrameDesigner* designer_instance =
+			dynamic_cast<ibFrontendDocMDIFrameDesigner*>(instance);
 		wxASSERT(designer_instance);
 		return designer_instance;
 	}
@@ -29,9 +32,9 @@ ibFrontendMainFrameDesigner* ibFrontendMainFrameDesigner::GetFrame() {
 
 ///////////////////////////////////////////////////////////////////
 
-ibFrontendMainFrameDesigner::ibFrontendMainFrameDesigner(const wxString& title,
+ibFrontendDocMDIFrameDesigner::ibFrontendDocMDIFrameDesigner(const wxString& title,
 	const wxPoint& pos,
-	const wxSize& size) : ibFrontendMainFrame(title, pos, size),
+	const wxSize& size) : ibFrontendDocMDIFrame(title, pos, size),
 
 	m_metaWindow(nullptr),
 
@@ -40,22 +43,48 @@ ibFrontendMainFrameDesigner::ibFrontendMainFrameDesigner(const wxString& title,
 	m_stackWindow(new ibStackWindow(this, wxID_ANY)),
 	m_watchWindow(new ibWatchWindow(this, wxID_ANY))
 {
-	m_docManager = new ibDocManagerDesigner;
+	m_docManager = new ibMetaDocManagerDesigner;
 }
 
-ibFrontendMainFrameDesigner::~ibFrontendMainFrameDesigner()
+ibFrontendDocMDIFrameDesigner::~ibFrontendDocMDIFrameDesigner()
 {
+	// MCP concurrency: stop polling before dropping the notifier — the
+	// timer would otherwise fire after the heap entry behind m_frame is
+	// gone. wxDELETE on m_externalMutationNotifier triggers its dtor's
+	// Stop() but explicit stop here removes any race window.
+	if (m_externalMutationNotifier != nullptr) {
+		m_externalMutationNotifier->Stop();
+	}
+	wxDELETE(m_externalMutationNotifier);
 	wxDELETE(m_docManager);
 }
 
-void ibFrontendMainFrameDesigner::CreateGUI()
+void ibFrontendDocMDIFrameDesigner::StartExternalMutationNotifier(const wxString& configDir)
+{
+	// MCP concurrency Layer 3: lazy-init on first open. Outliving the
+	// frame is impossible — the dtor deletes the notifier before the
+	// frame's heap entry is freed.
+	if (m_externalMutationNotifier == nullptr) {
+		m_externalMutationNotifier = new ibExternalMutationNotifier(this);
+	}
+	m_externalMutationNotifier->Start(configDir);
+}
+
+void ibFrontendDocMDIFrameDesigner::StopExternalMutationNotifier()
+{
+	if (m_externalMutationNotifier != nullptr) {
+		m_externalMutationNotifier->Stop();
+	}
+}
+
+void ibFrontendDocMDIFrameDesigner::CreateGUI()
 {
 	CreateWideGui();
 }
 
 static bool s_setModify = false, s_modified = false;
 
-void ibFrontendMainFrameDesigner::Modify(bool modify)
+void ibFrontendDocMDIFrameDesigner::Modify(bool modify)
 {
 	wxAuiPaneInfo& paneInfo = m_mgr.GetPane(wxAUI_PANE_METADATA);
 
@@ -88,12 +117,12 @@ void ibFrontendMainFrameDesigner::Modify(bool modify)
 	}
 }
 
-bool ibFrontendMainFrameDesigner::IsModified() const
+bool ibFrontendDocMDIFrameDesigner::IsModified() const
 {
 	return s_modified;
 }
 
-void ibFrontendMainFrameDesigner::LoadOptions()
+void ibFrontendDocMDIFrameDesigner::LoadOptions()
 {
 	// Disable logging since it's ok if the options file is not there.
 	wxLogNull logNo;
@@ -125,6 +154,32 @@ void ibFrontendMainFrameDesigner::LoadOptions()
 				}
 				node = node->GetNext();
 			}
+			// Help pane state — extract immediately into the
+			// pending struct so the values survive after `document`
+			// goes out of scope. Applied lazily inside EnsureHelpPane.
+			for (wxXmlNode* h = root->GetChildren(); h; h = h->GetNext()) {
+				if (h->GetName() != wxT("helpPane")) continue;
+				m_pendingHelpState.has = true;
+				m_pendingHelpState.currentId = h->GetAttribute(wxT("currentId"), wxEmptyString);
+				h->GetAttribute(wxT("tab"),       wxEmptyString).ToLong(&m_pendingHelpState.tab);
+				h->GetAttribute(wxT("fontBoost"), wxEmptyString).ToLong(&m_pendingHelpState.fontBoost);
+				break;
+			}
+			// Plugin WebView pane visibility — multi-paneId map. Applied
+			// later inside WirePluginWebPaneCallbacks at RegisterWebPane
+			// time because the plugin that owns each pane hasn't loaded
+			// yet at this point. visible="1" → AUI Show(true) on registration.
+			for (wxXmlNode* s = root->GetChildren(); s; s = s->GetNext()) {
+				if (s->GetName() != wxT("pluginWebPanes")) continue;
+				for (wxXmlNode* p = s->GetChildren(); p; p = p->GetNext()) {
+					if (p->GetName() != wxT("pane")) continue;
+					const wxString id = p->GetAttribute(wxT("id"), wxEmptyString);
+					if (id.IsEmpty()) continue;
+					m_pendingPluginWebPaneVisible[id] =
+						p->GetAttribute(wxT("visible"), wxT("0")) == wxT("1");
+				}
+				break;
+			}
 		}
 	}
 
@@ -134,11 +189,16 @@ void ibFrontendMainFrameDesigner::LoadOptions()
 
 	m_keyBinder.AddCommandsFromMenuBar(mb);
 
+	// Always start from defaults so command ids added after the user's
+	// options.xml was written still receive their shipped shortcuts.
+	// Load() then overlays any user-customised bindings on top — its
+	// callees overwrite the keys vector on a per-command basis, so
+	// untouched ids keep their defaults. Without this, every newly
+	// added shortcut (Ctrl+F1 / RawCtrl+F1 / etc.) silently fails to
+	// install on existing installations.
+	SetDefaultHotKeys();
 	if (keyBindingNode != nullptr) {
 		m_keyBinder.Load(keyBindingNode);
-	}
-	else {
-		SetDefaultHotKeys();
 	}
 
 	m_keyBinder.UpdateWindow(this);
@@ -147,7 +207,7 @@ void ibFrontendMainFrameDesigner::LoadOptions()
 	UpdateEditorOptions();
 }
 
-void ibFrontendMainFrameDesigner::SaveOptions()
+void ibFrontendDocMDIFrameDesigner::SaveOptions()
 {
 	// Disable logging since it's ok if the options file saving isn't successful.
 	wxLogNull logNo;
@@ -166,6 +226,36 @@ void ibFrontendMainFrameDesigner::SaveOptions()
 	// Save the key bindings.
 	root->AddChild(m_keyBinder.Save("keybindings"));
 
+	// Save help-pane state (last entry / tab / font boost). No-op when
+	// the pane was never opened in this session.
+	if (m_helpPane)
+		m_helpPane->SaveStateToXml(root);
+
+	// Save plugin WebView pane visibility per paneId. Walks the live AUI
+	// pane registry (m_pluginWebPaneIds is the set we know about) rather
+	// than caching pointers — a pane the user closed mid-session is gone
+	// from the AUI manager and gets visible="0" written. Pre-loaded
+	// entries that were never re-registered this session are preserved
+	// verbatim so a plugin temporarily uninstalled doesn't lose its
+	// remembered visibility.
+	{
+		std::unordered_map<wxString, bool> combined = m_pendingPluginWebPaneVisible;
+		for (const wxString& paneId : m_pluginWebPaneOrder) {
+			wxAuiPaneInfo& info = m_mgr.GetPane(paneId);
+			combined[paneId] = info.IsOk() && info.IsShown();
+		}
+		if (!combined.empty()) {
+			wxXmlNode* sp = new wxXmlNode(wxXML_ELEMENT_NODE, wxT("pluginWebPanes"));
+			for (const auto& kv : combined) {
+				wxXmlNode* p = new wxXmlNode(wxXML_ELEMENT_NODE, wxT("pane"));
+				p->AddAttribute(wxT("id"),      kv.first);
+				p->AddAttribute(wxT("visible"), kv.second ? wxT("1") : wxT("0"));
+				sp->AddChild(p);
+			}
+			root->AddChild(sp);
+		}
+	}
+
 	wxString directory =
 		wxStandardPaths::Get().GetUserDir(wxStandardPaths::Dir::Dir_Cache) + wxT("\\OES");
 
@@ -177,7 +267,7 @@ void ibFrontendMainFrameDesigner::SaveOptions()
 }
 
 #pragma region debugger 
-void ibFrontendMainFrameDesigner::Debugger_OnSessionStart()
+void ibFrontendDocMDIFrameDesigner::Debugger_OnSessionStart()
 {
 	m_menuDebug->Enable(wxID_DESIGNER_DEBUG_STEP_INTO, true);
 	m_menuDebug->Enable(wxID_DESIGNER_DEBUG_STEP_OVER, true);
@@ -187,7 +277,7 @@ void ibFrontendMainFrameDesigner::Debugger_OnSessionStart()
 	m_menuDebug->Enable(wxID_DESIGNER_DEBUG_NEXT_POINT, false);
 }
 
-void ibFrontendMainFrameDesigner::Debugger_OnSessionEnd()
+void ibFrontendDocMDIFrameDesigner::Debugger_OnSessionEnd()
 {
 	if (!debugClient->HasConnections()) {
 		m_menuDebug->Enable(wxID_DESIGNER_DEBUG_STEP_INTO, false);
@@ -199,25 +289,25 @@ void ibFrontendMainFrameDesigner::Debugger_OnSessionEnd()
 	}
 }
 
-void ibFrontendMainFrameDesigner::Debugger_OnEnterLoop()
+void ibFrontendDocMDIFrameDesigner::Debugger_OnEnterLoop()
 {
 	m_menuDebug->Enable(wxID_DESIGNER_DEBUG_PAUSE, false);
 	m_menuDebug->Enable(wxID_DESIGNER_DEBUG_NEXT_POINT, true);
 }
 
-void ibFrontendMainFrameDesigner::Debugger_OnLeaveLoop()
+void ibFrontendDocMDIFrameDesigner::Debugger_OnLeaveLoop()
 {
 	m_menuDebug->Enable(wxID_DESIGNER_DEBUG_PAUSE, true);
 	m_menuDebug->Enable(wxID_DESIGNER_DEBUG_NEXT_POINT, false);
 }
 #pragma endregion 
 
-bool ibFrontendMainFrameDesigner::Show(bool show)
+bool ibFrontendDocMDIFrameDesigner::Show(bool show)
 {
 	if (show && !m_metaWindow->Load())
 		return false;
 
-	bool ret = ibFrontendMainFrame::Show(show);
+	bool ret = ibFrontendDocMDIFrame::Show(show);
 	if (ret) {
 		if (!outputWindow->IsEmpty()) {
 			outputWindow->SetFocus();
@@ -232,14 +322,14 @@ bool ibFrontendMainFrameDesigner::Show(bool show)
 
 #include "backend/metadataConfiguration.h"
 
-bool ibFrontendMainFrameDesigner::AllowRun() const
+bool ibFrontendDocMDIFrameDesigner::AllowRun() const
 {
 	// Designer is compile-only — no session runtime, no BeforeStart /
 	// OnStart script events. Always allow frame show.
 	return true;
 }
 
-bool ibFrontendMainFrameDesigner::AllowClose() const
+bool ibFrontendDocMDIFrameDesigner::AllowClose() const
 {
 	// Unsaved-config confirmation is a designer-only concern; no
 	// BeforeExit / OnExit script events (no runtime to fire them on).

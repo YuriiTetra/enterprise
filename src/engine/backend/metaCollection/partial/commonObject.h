@@ -252,6 +252,9 @@ public:
 		);
 	}
 
+	bool MaterializeFormData(ibValueMetaObjectFormBase* metaForm,
+	                         wxString& error) const;
+
 #pragma region _form_builder_h_
 	//support form 
 	ibBackendValueForm* GetGenericForm(const wxString& strFormName = wxEmptyString,
@@ -2649,4 +2652,4 @@ protected:
 };
 #pragma endregion
 
-#endif 
+#endif

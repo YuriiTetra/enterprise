@@ -6,7 +6,7 @@
 #include "form.h"
 #include "backend/appData.h"
 #include "backend/metaData.h"
-#include "frontend/docView/docView.h"
+#include "frontend/docView/docManager.h"
 #include "backend/srcExplorer.h"
 #include "backend/moduleManager/moduleManager.h"
 #include "backend/session/session.h"
@@ -27,6 +27,68 @@
 // already ifdef'd inside it).
 #include "toolBar.h"
 #include "tableBox.h"
+
+namespace {
+
+void SetControlCaption(ibValueFrame* control, const wxString& caption)
+{
+	if (control == nullptr || caption.IsEmpty()) return;
+	if (ibProperty* prop = control->GetProperty(wxT("Title"))) {
+		prop->SetValue(caption);
+	}
+}
+
+void SetControlOrient(ibValueFrame* control, long orient)
+{
+	if (control == nullptr) return;
+	if (ibProperty* prop = control->GetProperty(wxT("Orient"))) {
+		prop->SetValue(wxVariant(orient));
+	}
+}
+
+std::string LooseFormKey(const wxString& value)
+{
+	std::string out;
+	const std::string src = std::string(value.utf8_str());
+	for (unsigned char ch : src) {
+		if (ch >= 'A' && ch <= 'Z') {
+			out.push_back(static_cast<char>(ch - 'A' + 'a'));
+		} else if ((ch >= 'a' && ch <= 'z') || (ch >= '0' && ch <= '9')) {
+			out.push_back(static_cast<char>(ch));
+		}
+	}
+	return out;
+}
+
+bool IsFooterField(const ibSourceExplorer& src)
+{
+	const std::string key =
+	    LooseFormKey(src.GetSourceName()) + LooseFormKey(src.GetSourceSynonym());
+	return key.find("komentar") != std::string::npos ||
+	       key.find("comment") != std::string::npos ||
+	       key.find("prymitka") != std::string::npos ||
+	       key.find("primechan") != std::string::npos ||
+	       key.find("vidpovidal") != std::string::npos ||
+	       key.find("otvetstven") != std::string::npos ||
+	       key.find("responsible") != std::string::npos;
+}
+
+ibValueFrame* EnsureStaticGroup(ibValueForm* form,
+                                ibValueFrame*& group,
+                                const wxString& name,
+                                const wxString& title)
+{
+	if (group != nullptr) return group;
+	group = form->CreateControl(wxT("Staticboxsizer"));
+	if (group != nullptr) {
+		group->SetControlName(name);
+		SetControlCaption(group, title);
+		SetControlOrient(group, wxVERTICAL);
+	}
+	return group;
+}
+
+} // namespace
 #ifdef OES_USE_WEB
 #include "frontend/web/webApplication.h"
 #include "frontend/web/webFrame.h"
@@ -47,7 +109,9 @@ void ibValueForm::BuildForm(const ibFormID& formType)
 		ibValue* prevSrcData = nullptr;
 
 		ibValueToolbar* mainToolBar =
-			dynamic_cast<ibValueToolbar*>(ibValueForm::CreateControl(wxT("Toolbar")));
+			wxDynamicCast(
+				ibValueForm::CreateControl(wxT("Toolbar")), ibValueToolbar
+			);
 
 		mainToolBar->SetControlName(wxT("MainToolbar"));
 		mainToolBar->SetActionSrc(FORM_ACTION);
@@ -66,7 +130,9 @@ void ibValueForm::BuildForm(const ibFormID& formType)
 					ibValueForm::CreateControl(wxT("ToolSeparator"), mainToolBar);
 				}
 				ibValueToolBarItem* toolBarItem =
-					dynamic_cast<ibValueToolBarItem*>(ibValueForm::CreateControl(wxT("Tool"), mainToolBar));
+					wxDynamicCast(
+						ibValueForm::CreateControl(wxT("Tool"), mainToolBar), ibValueToolBarItem
+					);
 				toolBarItem->SetControlName(mainToolBar->GetControlName() + actionData.GetNameByID(action_id));
 				//toolBarItem->SetCaption(actionData.GetCaptionByID(action_id));
 				//toolBarItem->SetToolTip(actionData.GetCaptionByID(action_id));
@@ -82,11 +148,18 @@ void ibValueForm::BuildForm(const ibFormID& formType)
 		if (sourceExplorer.IsTableSection()) {
 
 			mainTableBox =
-				dynamic_cast<ibValueModelTableBox*>(ibValueForm::CreateControl(wxT("Tablebox")));
+				wxDynamicCast(
+					ibValueForm::CreateControl(wxT("Tablebox")), ibValueModelTableBox
+				);
 
 			mainTableBox->SetControlName(sourceExplorer.GetSourceName());
 			mainTableBox->SetSource(sourceExplorer.GetSourceId());
+			SetControlCaption(mainTableBox, sourceExplorer.GetSourceSynonym());
 		}
+
+		ibValueFrame* headerGroup = nullptr;
+		ibValueFrame* tablesGroup = nullptr;
+		ibValueFrame* footerGroup = nullptr;
 
 		for (unsigned int idx = 0; idx < sourceExplorer.GetHelperCount(); idx++) {
 
@@ -94,27 +167,37 @@ void ibValueForm::BuildForm(const ibFormID& formType)
 
 			if (sourceExplorer.IsTableSection()) {
 				ibValueModelTableBoxColumn* tableBoxColumn =
-					dynamic_cast<ibValueModelTableBoxColumn*>(ibValueForm::CreateControl(wxT("TableboxColumn"), mainTableBox));
+					wxDynamicCast(
+						ibValueForm::CreateControl(wxT("TableboxColumn"), mainTableBox), ibValueModelTableBoxColumn
+					);
 				tableBoxColumn->SetControlName(mainTableBox->GetControlName() + nextSourceExplorer.GetSourceName());
 				tableBoxColumn->SetVisibleColumn(nextSourceExplorer.IsVisible() || sourceExplorer.GetHelperCount() == 1);
 				tableBoxColumn->SetSource(nextSourceExplorer.GetSourceId());
+				SetControlCaption(tableBoxColumn, nextSourceExplorer.GetSourceSynonym());
 			}
 			else
 			{
 				prevSrcData = nullptr;
 
 				if (nextSourceExplorer.IsTableSection()) {
+					ibValueFrame* parentGroup = EnsureStaticGroup(
+						this, tablesGroup, wxT("TablesGroup"), _("Табличные части"));
 
 					ibValueToolbar* toolBar =
-						dynamic_cast<ibValueToolbar*>(ibValueForm::CreateControl(wxT("Toolbar")));
+						wxDynamicCast(
+							ibValueForm::CreateControl(wxT("Toolbar"), parentGroup), ibValueToolbar
+						);
 
 					toolBar->SetControlName(wxT("Toolbar") + nextSourceExplorer.GetSourceName());
 
 					ibValueModelTableBox* tableBox =
-						dynamic_cast<ibValueModelTableBox*>(ibValueForm::CreateControl(wxT("Tablebox")));
+						wxDynamicCast(
+							ibValueForm::CreateControl(wxT("Tablebox"), parentGroup), ibValueModelTableBox
+						);
 
 					tableBox->SetControlName(nextSourceExplorer.GetSourceName());
 					tableBox->SetSource(nextSourceExplorer.GetSourceId());
+					SetControlCaption(tableBox, nextSourceExplorer.GetSourceSynonym());
 
 					toolBar->SetActionSrc(tableBox->GetControlID());
 
@@ -128,7 +211,9 @@ void ibValueForm::BuildForm(const ibFormID& formType)
 								ibValueForm::CreateControl(wxT("ToolSeparator"), toolBar);
 							}
 							ibValueToolBarItem* toolBarItem =
-								dynamic_cast<ibValueToolBarItem*>(ibValueForm::CreateControl(wxT("Tool"), toolBar));
+								wxDynamicCast(
+									ibValueForm::CreateControl(wxT("Tool"), toolBar), ibValueToolBarItem
+								);
 							toolBarItem->SetControlName(toolBar->GetControlName() + actionData.GetNameByID(action_id));
 							//toolBarItem->SetCaption(actionData.GetCaptionByID(action_id));
 							//toolBarItem->SetToolTip(actionData.GetCaptionByID(action_id));
@@ -144,24 +229,31 @@ void ibValueForm::BuildForm(const ibFormID& formType)
 						const ibSourceExplorer& colSourceExplorer = nextSourceExplorer.GetHelper(col);
 
 						ibValueModelTableBoxColumn* tableBoxColumn =
-							dynamic_cast<ibValueModelTableBoxColumn*>(ibValueForm::CreateControl(wxT("TableboxColumn"), tableBox));
-						tableBoxColumn->SetControlName(tableBox->GetControlName() + colSourceExplorer.GetSourceName());
-						//tableBoxColumn->SetCaption(colSourceExplorer.GetSourceSynonym());
-						tableBoxColumn->SetVisibleColumn(colSourceExplorer.IsVisible()
-							|| nextSourceExplorer.GetHelperCount() == 1);
-						tableBoxColumn->SetSource(colSourceExplorer.GetSourceId());
+							wxDynamicCast(
+								ibValueForm::CreateControl(wxT("TableboxColumn"), tableBox), ibValueModelTableBoxColumn
+							);
+							tableBoxColumn->SetControlName(tableBox->GetControlName() + colSourceExplorer.GetSourceName());
+							SetControlCaption(tableBoxColumn, colSourceExplorer.GetSourceSynonym());
+							tableBoxColumn->SetVisibleColumn(colSourceExplorer.IsVisible()
+								|| nextSourceExplorer.GetHelperCount() == 1);
+							tableBoxColumn->SetSource(colSourceExplorer.GetSourceId());
+						}
 					}
-				}
-				else {
-					if (nextSourceExplorer.ContainType(ibValueTypes::TYPE_BOOLEAN)
-						&& nextSourceExplorer.GetClsidList().size() == 1) {
-						ibValueCheckbox* checkbox =
-							dynamic_cast<ibValueCheckbox*>(ibValueForm::CreateControl(wxT("Checkbox")));
-						checkbox->SetControlName(nextSourceExplorer.GetSourceName());
-						//checkbox->SetCaption(nextSourceExplorer.GetSourceSynonym());
-						checkbox->EnableWindow(nextSourceExplorer.IsEnabled());
-						checkbox->VisibleWindow(nextSourceExplorer.IsVisible());
-						checkbox->SetSource(nextSourceExplorer.GetSourceId());
+					else {
+						ibValueFrame* fieldParent = IsFooterField(nextSourceExplorer)
+							? EnsureStaticGroup(this, footerGroup, wxT("FooterGroup"), _("Дополнительно"))
+							: EnsureStaticGroup(this, headerGroup, wxT("HeaderGroup"), _("Шапка"));
+						if (nextSourceExplorer.ContainType(ibValueTypes::TYPE_BOOLEAN)
+							&& nextSourceExplorer.GetClsidList().size() == 1) {
+							ibValueCheckbox* checkbox =
+								wxDynamicCast(
+									ibValueForm::CreateControl(wxT("Checkbox"), fieldParent), ibValueCheckbox
+								);
+							checkbox->SetControlName(nextSourceExplorer.GetSourceName());
+							SetControlCaption(checkbox, nextSourceExplorer.GetSourceSynonym());
+							checkbox->EnableWindow(nextSourceExplorer.IsEnabled());
+							checkbox->VisibleWindow(nextSourceExplorer.IsVisible());
+							checkbox->SetSource(nextSourceExplorer.GetSourceId());
 					}
 					else {
 
@@ -173,13 +265,15 @@ void ibValueForm::BuildForm(const ibFormID& formType)
 						if (nextSourceExplorer.GetClsidList().size() != 1)
 							selButton = true;
 
-						ibValueTextCtrl* textCtrl =
-							dynamic_cast<ibValueTextCtrl*>(ibValueForm::CreateControl(wxT("Textctrl")));
-						textCtrl->SetControlName(nextSourceExplorer.GetSourceName());
-						//textCtrl->SetCaption(nextSourceExplorer.GetSourceSynonym());
-						textCtrl->EnableWindow(nextSourceExplorer.IsEnabled());
-						textCtrl->VisibleWindow(nextSourceExplorer.IsVisible());
-						textCtrl->SetSource(nextSourceExplorer.GetSourceId());
+							ibValueTextCtrl* textCtrl =
+								wxDynamicCast(
+									ibValueForm::CreateControl(wxT("Textctrl"), fieldParent), ibValueTextCtrl
+								);
+							textCtrl->SetControlName(nextSourceExplorer.GetSourceName());
+							SetControlCaption(textCtrl, nextSourceExplorer.GetSourceSynonym());
+							textCtrl->EnableWindow(nextSourceExplorer.IsEnabled());
+							textCtrl->VisibleWindow(nextSourceExplorer.IsVisible());
+							textCtrl->SetSource(nextSourceExplorer.GetSourceId());
 
 						textCtrl->SetSelectButton(selButton);
 						textCtrl->SetOpenButton(false);
@@ -192,7 +286,9 @@ void ibValueForm::BuildForm(const ibFormID& formType)
 	else {
 
 		ibValueToolbar* mainToolBar =
-			dynamic_cast<ibValueToolbar*>(ibValueForm::CreateControl(wxT("Toolbar")));
+			wxDynamicCast(
+				ibValueForm::CreateControl(wxT("Toolbar")), ibValueToolbar
+			);
 
 		mainToolBar->SetControlName(wxT("MainToolbar"));
 		mainToolBar->SetActionSrc(FORM_ACTION);
@@ -206,7 +302,9 @@ void ibValueForm::BuildForm(const ibFormID& formType)
 
 			if (id != wxNOT_FOUND) {
 				ibValueToolBarItem* toolBarItem =
-					dynamic_cast<ibValueToolBarItem*>(ibValueForm::CreateControl(wxT("Tool"), mainToolBar));
+					wxDynamicCast(
+						ibValueForm::CreateControl(wxT("Tool"), mainToolBar), ibValueToolBarItem
+					);
 				toolBarItem->SetControlName(mainToolBar->GetControlName() + actionData.GetNameByID(id));
 				//toolBarItem->SetCaption(actionData.GetCaptionByID(id));
 				//toolBarItem->SetToolTip(actionData.GetCaptionByID(id));
@@ -248,11 +346,11 @@ void ibValueForm::InitializeForm(const ibValueMetaObjectFormBase* creator,
 		dynamic_cast<ibRuntimeModuleDataObject*>(srcObject);
 	ibRuntimeModuleDataObject* descParent = sourceDesc;
 	if (descParent == nullptr && creator != nullptr) {
-		// No bound data object → parent under the metadata's module manager.
-		// Through the seam so the Designer (which has no runtime root mm) parents
-		// under its lightweight designer manager, same as every other edit-path
-		// object. Null-folds for sessionless / no-cache hosts.
-		descParent = ibSession::EditModuleManagerFor(creator->GetMetaData());
+		ibSession* session = ibSession::Current();
+		if (session != nullptr) {
+			if (ibValueModuleManager* mm = session->GetManagerModule())
+				descParent = mm;
+		}
 	}
 	if (descParent != nullptr)
 		ibRuntimeModuleDataObject::SetParent(descParent);
@@ -283,9 +381,7 @@ bool ibValueForm::InitializeFormModule()
 		// and pick up the parent's scope chain on creation. Run is
 		// Designer-guarded; Compile internally too. Session linkage
 		// flows through the parent chain (descriptor в†’ root в†’ session).
-		BindContextVariable(thisForm, this);                                          // contextual
-		BindExportVariable(wxT("Controls"), m_formCollectionControl);                 // exported
-		BindExportVariable(wxT("DataSource"), dynamic_cast<ibValue*>(m_sourceObject)); // exported — source set-once before this (InitializeForm); null (sourceless/designer) is fine since the pre-flight is lazy
+		BindContextVariable(thisForm, this);
 		InitializeRuntime();
 
 		try {
@@ -298,7 +394,7 @@ bool ibValueForm::InitializeFormModule()
 			return false;
 		}
 
-		InvalidateNames();
+		PrepareNames();
 	}
 
 #pragma region _control_guard_
@@ -431,7 +527,7 @@ void ibValueForm::RemoveControl(const ibValue& vControl)
 
 void ibValueForm::ShowForm(ibBackendMetaDocument* doc, bool createContext)
 {
-	ibDocument* docParent = static_cast<ibMetaDocument*>(doc);
+	ibMetaDocument* docParent = static_cast<ibMetaDocument *>(doc);
 
 	if (ibBackendException::IsEvalMode())
 		return;
@@ -449,64 +545,7 @@ void ibValueForm::ShowForm(ibBackendMetaDocument* doc, bool createContext)
 	}
 
 	if (!createContext || !appData->DesignerMode()) {
-		// Soft-lock UX (docs/record-locks.md Phase B.3): try to acquire
-		// the long-held sys_lock on the form's source, but DO NOT
-		// block form open on conflict. Users can view / edit
-		// in-memory even when another session holds the lock; the
-		// Write path re-attempts the acquire and fails the save with
-		// "X is locked by user Y" if conflict persists at save time.
-		// This avoids over-restrictive "form refuses to open" UX
-		// while still preventing lost updates.
-		if (ibSourceDataObject* const src = GetSourceObject()) {
-			try {
-				src->TryAcquireFormLock();
-			}
-			catch (const ibBackendLockException& lockErr) {
-				// Conflict — surface the blocking user as a caption badge
-				// so the operator knows "view-only" status without
-				// attempting to save. Form opens regardless; Write path
-				// will re-throw if conflict persists at save time.
-				if (lockErr.GetKind() == ibBackendLockException::Kind::LockConflict)
-					SetLockBadge(lockErr.GetBlockingUser());
-			}
-			catch (const ibBackendException&) {
-				// Non-conflict lock-infra error (DB transient etc.) —
-				// silent. Write path will re-check at save time.
-			}
-			catch (...) {
-				// Defensive — unknown exception, still open form.
-			}
-		}
-
 		CreateDocForm(docParent, createContext);
-	}
-}
-
-void ibValueForm::RefreshLockBadge()
-{
-	if (m_lockBadgeHolder.IsEmpty())
-		return;   // not in soft-lock view-only state — nothing to refresh
-
-	ibSourceDataObject* const src = GetSourceObject();
-	if (src == nullptr)
-		return;
-
-	try {
-		src->TryAcquireFormLock();
-		// Acquire succeeded — lock is now ours, badge clears.
-		m_lockBadgeHolder.clear();
-	}
-	catch (const ibBackendLockException& err) {
-		// Still locked. Holder may have changed (one process released,
-		// another took over) — keep the field in sync so UI surfaces
-		// the current truth.
-		if (err.GetKind() == ibBackendLockException::Kind::LockConflict
-		    && !err.GetBlockingUser().IsEmpty()) {
-			m_lockBadgeHolder = err.GetBlockingUser();
-		}
-	}
-	catch (...) {
-		// Transient DB error — leave badge as-is. Next tick re-tries.
 	}
 }
 
@@ -515,10 +554,7 @@ void ibValueForm::UpdateForm()
 	if (ibBackendException::IsEvalMode())
 		return;
 
-	// Cross-user notifier tick is the natural pulse for lock-state
-	// refresh too. Cheap when badge is empty (early return).
-	RefreshLockBadge();
-
+	
 	ibFormVisualDocument* const ownerDocForm = GetVisualDocument();
 
 	if (ownerDocForm != nullptr) {
@@ -558,7 +594,7 @@ bool ibValueForm::CloseForm(bool force)
 
 	if (ownerDocForm != nullptr) {
 #ifdef OES_USE_WEB
-		// Defer the ibDocument::DeleteAllViews — it would delete the
+		// Defer the wxDocument::DeleteAllViews — it would delete the
 		// view, host, AND every control (including the toolbar that
 		// just fired the OnTool we're in). Mark the tab; the
 		// session's Dispatch epilogue drains pending closes AFTER
@@ -568,7 +604,7 @@ bool ibValueForm::CloseForm(bool force)
 		}
 		return true;
 #else
-		// Same hazard on desktop — ibDocument::DeleteAllViews deletes
+		// Same hazard on desktop — wxDocument::DeleteAllViews deletes
 		// the view (a wxEvtHandler) plus every control synchronously.
 		// If CloseForm was invoked from within the toolbar's tool
 		// event (Save-and-close command), control returns to
@@ -620,14 +656,14 @@ bool ibValueForm::GenerateForm(ibValueRecordDataObjectRef* obj) const
 #else
 	const ibValueMetaObjectRecordDataMutableRef* metaObject = obj->GetMetaObject();
 	wxASSERT(metaObject);
-	const ibMetaData* metaData = metaObject->GetMetaData();
+	ibMetaData* metaData = metaObject->GetMetaData();
 	wxASSERT(metaData);
 
 	ibDialogGeneration* selectDataType = new ibDialogGeneration(metaData, metaObject->GetGenerationDescription());
 
 	ibMetaID sel_id = 0;
 	if (selectDataType->ShowModal(sel_id)) {
-		const ibValueMetaObjectRecordDataMutableRef* meta = metaData->FindAnyObjectByFilter<ibValueMetaObjectRecordDataMutableRef>(sel_id);
+		ibValueMetaObjectRecordDataMutableRef* meta = metaData->FindAnyObjectByFilter<ibValueMetaObjectRecordDataMutableRef>(sel_id);
 		if (meta != nullptr) {
 			ibValueRecordDataObjectRef* genObj = meta->CreateObjectValue(obj, true);
 			if (genObj != nullptr) {
@@ -675,12 +711,9 @@ ibValueFrame* ibValueForm::CreateControl(const wxString& clsControl, ibValueFram
 		}
 	}
 
-	// Control added → both the form's own attribute surface (FillMembers loops
-	// GetControlList) and the Controls collection's surface are stale.
-	InvalidateNames();
-	m_formCollectionControl->InvalidateNames();
+	m_formCollectionControl->PrepareNames();
 
-	//return value
+	//return value 
 	if (newControl->GetComponentType() == COMPONENT_TYPE_SIZERITEM)
 		return newControl->GetChild(0);
 
@@ -707,21 +740,27 @@ void ibValueForm::RemoveControl(ibValueFrame* control)
 	ibValueFrame* parentControl = currentControl->GetParent();
 
 	if (parentControl->GetComponentType() == COMPONENT_TYPE_SIZERITEM) {
-		// The sizer-item wraps currentControl; removing the wrapper from its owner
-		// releases the owning handle, cascading down to currentControl.
 		ibValueFrame* parentOwner = parentControl->GetParent();
-		if (parentOwner != nullptr)
+		if (parentOwner != nullptr) {
 			parentOwner->RemoveChild(parentControl);
+		}
+		parentControl->SetParent(nullptr);
+		parentControl->RemoveChild(currentControl);
+		parentControl->DecrRef();
+
+		currentControl->SetParent(nullptr);
+		currentControl->DecrRef();
 	}
 	else {
 		ibValueFrame* parentOwner = currentControl->GetParent();
-		if (parentOwner != nullptr)
-			parentOwner->RemoveChild(currentControl); // owning handle releases → destroys
+		if (parentOwner != nullptr) {
+			parentOwner->RemoveChild(currentControl);
+		}
+		currentControl->SetParent(nullptr);
+		currentControl->DecrRef();
 	}
 
-	// Control removed → form attribute surface + Controls collection surface stale.
-	InvalidateNames();
-	m_formCollectionControl->InvalidateNames();
+	m_formCollectionControl->PrepareNames();
 }
 
 void ibValueForm::OnIdleHandler(wxTimerEvent& event)
@@ -806,6 +845,17 @@ void ibValueForm::DetachIdleHandler(const wxString& procedureName)
 				timer->Stop();
 			if (timer)
 				timer->Unbind(wxEVT_TIMER, &ibValueForm::OnIdleHandler, this);
+		}
+	}
+}
+
+void ibValueForm::ClearRecursive(ibValueFrame* control)
+{
+	for (unsigned int idx = control->GetChildCount(); idx > 0; idx--) {
+		ibValueFrame* controlChild = control->GetChild(idx - 1);
+		ClearRecursive(controlChild);
+		if (controlChild != nullptr) {
+			controlChild->DecrRef();
 		}
 	}
 }

@@ -22,7 +22,7 @@ wxObject* ibValueWrapSizer::Create(ibFrontendWindow* /*parent*/, ibVisualHost* /
 #endif
 }
 
-void ibValueWrapSizer::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost *visualHost, bool firstСreated)
+void ibValueWrapSizer::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost *visualHost, bool firstCreated)
 {
 }
 
