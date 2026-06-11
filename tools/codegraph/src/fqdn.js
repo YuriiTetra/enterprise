@@ -30,7 +30,10 @@ export function bucketFor(relpath) {
   return BUCKETS.find((b) => b.test(relpath)) || BUCKETS[BUCKETS.length - 1];
 }
 
-const SHORT_RE = /^([A-Z])(\d{2,4})\.([A-Za-z0-9_]+)\.(.+)$/;
+// Slot digits are optional: v1 emits bucketless short forms (D.module.symbol);
+// the numeric-slot variant (D100.module.symbol) is reserved for when collisions
+// across modules force explicit slots.
+const SHORT_RE = /^([A-Z])(\d{0,4})\.([A-Za-z0-9_]+)\.(.+)$/;
 
 /** Classify a raw fqdn string: 'short' | 'canonical-code' | 'canonical-doc'. */
 export function classify(fqdn) {

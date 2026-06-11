@@ -43,13 +43,15 @@ function flattenSymbols(symbols, relpath, parentQual = '', acc = []) {
   for (const s of symbols || []) {
     const qual = parentQual ? `${parentQual}::${s.name}` : s.name;
     if (ATOM_KINDS.has(s.kind)) {
+      // DocumentSymbol has selectionRange/range; SymbolInformation has location.range
+      const start = (s.selectionRange?.start ?? s.range?.start ?? s.location?.range?.start ?? { line: 0, character: 0 });
       acc.push({
         name: s.name,
         symbol: qual,
         kind: s.kind,
         detail: s.detail || '',
-        line: (s.selectionRange?.start?.line ?? s.range?.start?.line ?? 0) + 1,
-        character: (s.selectionRange?.start?.character ?? 0) + 1,
+        line: start.line + 1,
+        character: start.character + 1,
         relpath,
         parentQual,
       });

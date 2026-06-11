@@ -61,7 +61,8 @@ export class Clangd {
       capabilities: {
         textDocument: {
           callHierarchy: { dynamicRegistration: false },
-          references: {}, definition: {}, documentSymbol: {},
+          references: {}, definition: {},
+          documentSymbol: { hierarchicalDocumentSymbolSupport: true },
         },
         workspace: { symbol: {} },
         window: { workDoneProgress: true },
