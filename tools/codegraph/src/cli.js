@@ -48,9 +48,10 @@ if (cmd === 'index' || cmd === 'rebuild') {
   const codePaths = paths.filter((p) => p !== 'docs');
   const db = new Db(DBFILE);
   await withClangd(async (c) => {
-    log('waiting for clangd background index...');
-    await c.awaitIndexed(120000);
-    log('clangd idle; indexing code');
+    // documentSymbols is per-file AST — it does NOT need the full background
+    // index. A short settle lets clangd parse compile flags; then we index.
+    await new Promise((r) => setTimeout(r, 3000));
+    log('indexing code (documentSymbols per file)');
     const n = await indexCode(db, c, ROOT, codePaths, log);
     log(`indexed ${n} atoms`);
   });
