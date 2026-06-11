@@ -4,8 +4,7 @@
 #include "frame.h"
 
 class FRONTEND_API ibValueControl : public ibValueFrame {
-	wxDECLARE_ABSTRACT_CLASS(ibValueControl);
-public:
+	public:
 
 	ibValueControl();
 	virtual ~ibValueControl();
@@ -50,7 +49,7 @@ public:
 	}
 
 	//get metaData
-	virtual ibMetaData* GetMetaData() const override;
+	virtual const ibMetaData* GetMetaData() const override;
 
 	/**
 	* Can delete object

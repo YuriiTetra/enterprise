@@ -25,7 +25,7 @@ ibBackendDocFrame* ibGUISession::GetFrame() const
 	return m_frame;
 }
 
-void ibGUISession::AttachFrame(ibFrontendDocMDIFrame* frame)
+void ibGUISession::AttachFrame(ibFrontendMainFrame* frame)
 {
 	m_frame = frame;
 	if (m_frame == nullptr) return;
@@ -41,23 +41,25 @@ void ibGUISession::AttachFrame(ibFrontendDocMDIFrame* frame)
 	// Initialize() is otherwise a separate explicit step in mainApp.
 	frame->Initialize(this);
 
-	// Register the singleton ibFrontendDocMDIFrame::s_instance so legacy
-	// `backend_mainFrame` macro / ibFrontendDocMDIFrame::GetFrame() keep
+	// Register the singleton ibFrontendMainFrame::s_instance so legacy
+	// `backend_mainFrame` macro / ibFrontendMainFrame::GetFrame() keep
 	// resolving to the same window that session now owns.
-	ibFrontendDocMDIFrame::InitFrame(frame);
+	ibFrontendMainFrame::InitFrame(frame);
 
 	// Reload listener — admin's "reload" signal on this session's
 	// sys_session row fires NotifyReload from the registry worker.
 	// Hop to the main thread, notify the user, close the frame.
 	// Process exits through wxApp's normal shutdown.
 	ibSession* sessSelf = this;
-	ibSessionRegistry::Instance().OnReload([sessSelf](ibSession* target) {
+	auto* reg = ibApplicationData::GetSessionRegistry();
+	if (reg == nullptr) return;
+	reg->OnReload([sessSelf](ibSession* target) {
 		if (target != sessSelf) return;
 		if (wxTheApp == nullptr) return;
 		wxTheApp->CallAfter([]() {
-			wxMessageBox(_("Session reloaded by an administrator. The application will close — please re-open it from the launcher."),
+			wxMessageBox(_("Session reloaded by an administrator. The application will close - please re-open it from the launcher."),
 				wxTheApp->GetAppDisplayName(), wxOK | wxICON_INFORMATION);
-			if (auto* frame = ibFrontendDocMDIFrame::GetFrame())
+			if (auto* frame = ibFrontendMainFrame::GetFrame())
 				frame->Close(true);
 		});
 	});

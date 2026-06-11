@@ -11,7 +11,7 @@
 class ibValueMetaObjectChartOfCharacteristicTypes : 
 	public ibValueMetaObjectRecordDataHierarchyMutableRef, 
 	public ibBackendTypeConfigFactory {
-	wxDECLARE_DYNAMIC_CLASS(ibValueMetaObjectChartOfCharacteristicTypes);
+	public:
 private:
 	enum
 	{
@@ -109,20 +109,14 @@ protected:
 	virtual ibTypeDescription& GetTypeDesc() const { return m_propertyTypesOfCharacteristics->GetValueAsTypeDesc(); }
 
 	//get metadata
-	virtual ibMetaData* GetMetaData() const { return m_metaData; }
+	virtual const ibMetaData* GetMetaData() const { return m_metaData; }
+	virtual ibMetaData* GetMetaData() { return m_metaData; }
 
-	//predefined array
-	virtual bool FillArrayObjectByPredefinedAttribute(std::vector<ibValueMetaObjectAttributeBase*>& array) const {
-		array = {
-			m_propertyAttributeType->GetMetaObject(),
-			m_propertyAttributePredefined->GetMetaObject(),
-			m_propertyAttributeCode->GetMetaObject(),
-			m_propertyAttributeDescription->GetMetaObject(),
-			m_propertyAttributeParent->GetMetaObject(),
-			m_propertyAttributeIsFolder->GetMetaObject(),
-			m_propertyAttributeReference->GetMetaObject(),
-			m_propertyAttributeDeletionMark->GetMetaObject(),
-		};
+	// Additive contract — chains to HierarchyMutableRef. ChartOfChar
+	// adds only its Type attribute on top of the inherited set.
+	virtual bool FillArrayObjectByPredefinedAttribute(std::vector<ibValueMetaObjectAttributeBase*>& array) const override {
+		ibValueMetaObjectRecordDataHierarchyMutableRef::FillArrayObjectByPredefinedAttribute(array);
+		array.push_back(m_propertyAttributeType->GetMetaObject());
 		return true;
 	}
 
@@ -230,6 +224,7 @@ private:
 //********************************************************************************************
 
 class ibValueRecordDataObjectChartOfCharacteristicTypes : public ibValueRecordDataObjectHierarchyRef {
+	public:
 	ibValueRecordDataObjectChartOfCharacteristicTypes(const ibValueMetaObjectChartOfCharacteristicTypes* metaObject, const ibGuid& objGuid = wxNullGuid, ibObjectMode objMode = ibObjectMode::OBJECT_ITEM);
 	ibValueRecordDataObjectChartOfCharacteristicTypes(const ibValueRecordDataObjectChartOfCharacteristicTypes& source);
 public:
@@ -238,25 +233,16 @@ public:
 	//*                              Support id's                                *
 	//****************************************************************************
 
-	//save modify
-	virtual bool SaveModify() { return WriteObject(); }
-
-	//default methods
-	virtual bool FillObject(ibValue& vFillObject) const { return Filling(vFillObject); }
-	virtual ibValueRecordDataObjectRef* CopyObject(bool showValue = false) {
-		ibValueRecordDataObjectRef* objectRef = CopyObjectValue();
-		if (objectRef != nullptr && showValue)
-			objectRef->ShowFormValue();
-		return objectRef;
-	}
-	virtual bool WriteObject();
-	virtual bool DeleteObject();
+	// SaveModify / FillObject / CopyObject / WriteObject / DeleteObject
+	// inherited from ibValueRecordDataObjectHierarchyRef and
+	// ibValueRecordDataObjectRef.
 
 	//****************************************************************************
 	//*                              Support methods                             *
 	//****************************************************************************
 
-	virtual void PrepareNames() const;
+	// Own methods (data members come from the base FillDataMembers); bound in the ctor.
+	void FillMethods(ibMemberTable& helper) const;
 
 	//****************************************************************************
 	//*                              Override attribute                          *
@@ -270,11 +256,14 @@ public:
 	//support source data
 	virtual ibSourceExplorer GetSourceExplorer() const;
 
-#pragma region _form_builder_h_
-	//support show
-	virtual void ShowFormValue(const wxString& strFormName = wxEmptyString, ibBackendControlFrame* owner = nullptr);
-	virtual ibBackendValueForm* GetFormValue(const wxString& strFormName = wxEmptyString, ibBackendControlFrame* owner = nullptr);
-#pragma endregion
+	// ShowFormValue / GetFormValue inherited from HierarchyRef.
+protected:
+	virtual ibFormID GetCurrentObjectFormID() const override {
+		return m_objMode == ibObjectMode::OBJECT_ITEM
+			? ibValueMetaObjectChartOfCharacteristicTypes::eFormObject
+			: ibValueMetaObjectChartOfCharacteristicTypes::eFormFolder;
+	}
+public:
 
 	//support actionData
 	virtual ibActionCollection GetActionCollection(const ibFormID& formType);

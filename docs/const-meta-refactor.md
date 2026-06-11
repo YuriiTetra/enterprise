@@ -1,4 +1,9 @@
-# Const-meta refactor (landed 2026-05-04)
+# Const-meta refactor
+
+> **Status:** LANDED 2026-05-04. 133 files modified, full solution
+> builds clean Debug|Win32, smoke-tested. 13 legitimate `const_cast`s
+> remain (documented below); one backdoor (`ibMetaData::Find*` family)
+> deferred — tracked in `next-session-metadata-const.md`.
 
 ## What
 
@@ -106,7 +111,16 @@ Designer keeps non-const access through:
    `treeDataReport.cpp` call `dataProcessor->ProcessCommand(ID_METATREE_OPEN_MODULE)`
    instead of duplicating `OpenFormMDI(metaObject->GetObjectModule())`
 
-## Remaining const_casts (13, all legitimate)
+## Remaining const_casts in metaCollection (3, all legitimate)
+
+> **Count caveat (2026-05-28 audit):** the original "13 legitimate
+> `const_cast`s remain" claim was the metaCollection-narrow count
+> at landing. Process-wide grep across `src/engine/backend/` now
+> finds 28 occurrences across 17 files (mostly outside the
+> const-meta surface — `propertyManager`, `firebirdHlc`,
+> `mysql/engine/`, etc.). The 3 in `metaObject.h::ConvertToValue`
+> below are still the only ones touching the const-meta path; the
+> "floor of 13" figure is no longer accurate process-wide.
 
 - 3 in `metaObject.h::ConvertToValue` template — canonical `dynamic_cast`
   through `const_cast<ibValueMetaObject*>(this)`. Standard C++ pattern;
@@ -118,7 +132,7 @@ That's the floor reachable without going into `ibMetaData` Find* (see below).
 
 The XML/JSON configuration export/import code (added by another contributor)
 held 10 `const_cast`s on `GetObjectModule`/`GetManagerModule` returns. It
-didn't go through the canonical `Save/LoadDataFromBuffer` path, was not
+didn't go through the canonical `Dump/RestoreDataFromBuffer` path, was not
 covered by the binary serialization tests, and required cascading
 const-cast at every `SetModuleText` call site.
 
@@ -172,3 +186,34 @@ FillArray/GetAny method — and on every sibling collection helper like
 
 First attempt cascaded to 4700+ compile errors. Reverted; tracked as
 follow-up in `next-session-metadata-const.md`.
+
+## Landing — backdoor closed (2026-06-03)
+
+The big-bang second attempt landed; full `Debug|x86` builds clean and the
+runtime (launcher → forms) is verified. The boundary is now const-correct:
+
+- **`GetMetaData()` — capability split, NOT a pure pair.** `ibBackendTypeConfigFactory`
+  (backend_type.h) declares **only** the const read accessor
+  `virtual const ibMetaData* GetMetaData() const = 0;`. The mutable overload
+  `virtual ibMetaData* GetMetaData()` is added **only** by classes that genuinely
+  own a mutable `ibMetaData` — the metaobjects (`metaObject.h`,
+  `metaAttributeObject.h`, `chartOfCharacteristicTypes.h`, `propertyObject.h`).
+  Runtime classes (forms / controls) take their metadata from a const source
+  (`GetSourceMetaObject()` is const) and so implement only the const accessor —
+  they physically cannot produce a mutable pointer without a `const_cast`.
+  NVI was rejected for exactly this reason: any single shared virtual would force
+  a `const_cast` in one of the wrappers. See memory `getmetadata-capability-split`.
+- **`FindAnyObjectByFilter<T>()` ×3** (by id / id+clsid / id+filter) — overload pair
+  (const → `const T*`, non-const → `T*`). metaData.h:338-365.
+- **`GetCommonMetaObject()`** — overload pair. metaData.h:200-201.
+- Runtime path `const meta → FindXxx → const T* → mutator()` is now a **compile
+  error**, no `const_cast` anywhere in the closure.
+
+### Still deferred — `GetAnyArrayObject<T>()`
+
+`GetAnyArrayObject<T>(...) const → std::vector<T*>` (metaData.h:306/314/322) still
+returns **non-const** element pointers from a const `ibMetaData`. A const metadata
+can therefore still hand out mutable metaobject pointers through it. Left deferred:
+pairing it means `vector<const T*>` and fixing every caller that iterates
+`for (auto x : meta->GetAnyArrayObject(...))` and touches `x` — a wide ripple with
+no current need. Tracked as the single remaining boundary hole.

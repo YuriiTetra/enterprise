@@ -17,7 +17,7 @@
 //     │
 //   wfrontendShutdown()                         // at process exit
 //
-// Real per-session state (appData-scoped module manager, MDI frame,
+// Real per-session state (appData-scoped module manager, main frame,
 // ibProcUnit, etc.) will be plugged in in follow-up steps. For now
 // the session id is just a random token and the manager keeps
 // bookkeeping in memory.
@@ -127,7 +127,7 @@ WFRONTEND_API std::string wfrontendMenuJSON();
 //                          the oes_session cookie.
 //   Login(id, user, pw)  — authenticate the given session. On success
 //                          the session spins up its ibWebApplication
-//                          (MDI frame + CreateMainModule) and is ready
+//                          (main frame + CreateMainModule) and is ready
 //                          to serve form requests.
 //   SessionExists/Destroy/Count — bookkeeping.
 WFRONTEND_API std::string wfrontendCreateSession();
@@ -173,6 +173,23 @@ WFRONTEND_API bool wfrontendReloadSessionByGuid(const std::string& sessionGuid);
 // Cheap to call — just reads atomic counters and the registry's
 // last-refreshed snapshot. Returns "{}" on any internal failure.
 WFRONTEND_API std::string wfrontendDiagJSON();
+
+// sys_lock snapshot — JSON array of cluster-wide held locks for
+// /admin/locks and the designer's Active Users → Locks sub-pane. Shape:
+//   [ { "lockGuid":"<uuid>", "sessionGuid":"<uuid>",
+//       "namespace":"Catalog.Goods", "key":"Ref=<uuid>",
+//       "mode":"Exclusive", "acquiredAt":"2026-05-24T10:11:12",
+//       "user":"ivanov", "computer":"WS-42" }, ... ]
+// Reads the same snapshot ibLockManager::GetSnapshot returns; one row
+// per held sys_lock entry. Returns "[]" on internal failure.
+WFRONTEND_API std::string wfrontendLocksJSON();
+
+// Force-release one sys_lock row by its lockGuid. Owner is not asked —
+// admin override (e.g. session went zombie, user can't release through
+// the UI). Returns true iff the DELETE ran without error (row may
+// already have been released by the natural path; that's still "ok"
+// from the admin's view). Used by DELETE /admin/locks/<lockGuid>.
+WFRONTEND_API bool wfrontendForceReleaseLockByGuid(const std::string& lockGuid);
 
 // Current tab count for the session (0 if the session doesn't exist or
 // isn't authenticated yet). Used by GET / to decide whether F5 should

@@ -12,7 +12,6 @@
 //*										 metaData											 * 
 //********************************************************************************************
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectCatalog, ibValueMetaObjectRecordDataHierarchyMutableRef);
 
 //********************************************************************************************
 //*                                      metaData                                            *
@@ -20,15 +19,15 @@ wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectCatalog, ibValueMetaObjectRecordDataH
 
 ibValueMetaObjectCatalog::ibValueMetaObjectCatalog() : ibValueMetaObjectRecordDataHierarchyMutableRef()
 {
-	//set default proc
-	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("BeforeWrite"), ibContentHelper::eProcedureHelper, { wxT("Cancel") });
-	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("OnWrite"), ibContentHelper::eProcedureHelper, { wxT("Cancel") });
+	// Common 6 hooks — m_propertyObjectModule is declared on the leaf,
+	// not on MutableRef base, so each leaf ctor registers them locally.
+	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("BeforeWrite"),  ibContentHelper::eProcedureHelper, { wxT("Cancel") });
+	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("OnWrite"),      ibContentHelper::eProcedureHelper, { wxT("Cancel") });
 	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("BeforeDelete"), ibContentHelper::eProcedureHelper, { wxT("Cancel") });
-	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("OnDelete"), ibContentHelper::eProcedureHelper, { wxT("Cancel") });
-
-	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("Filling"), ibContentHelper::eProcedureHelper, { wxT("Source"), wxT("StandartProcessing") });
-	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("OnCopy"), ibContentHelper::eProcedureHelper, { wxT("Source") });
-
+	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("OnDelete"),     ibContentHelper::eProcedureHelper, { wxT("Cancel") });
+	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("Filling"),      ibContentHelper::eProcedureHelper, { wxT("Source"), wxT("StandartProcessing") });
+	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("OnCopy"),       ibContentHelper::eProcedureHelper, { wxT("Source") });
+	// Leaf-specific: code-generation hook.
 	(*m_propertyObjectModule)->SetDefaultProcedure(wxT("SetNewCode"), ibContentHelper::eProcedureHelper, { wxT("Prefix"), wxT("StandartProcessing") });
 }
 
@@ -62,7 +61,7 @@ ibValueMetaObjectFormBase* ibValueMetaObjectCatalog::GetDefaultFormByID(const ib
 
 ibValueManagerDataObject* ibValueMetaObjectCatalog::CreateManagerDataObjectValue() const
 {
-	return ibValue::CreateAndPrepareValueRef<ibValueManagerDataObjectCatalog>(this);
+	return new ibValueManagerDataObjectCatalog(this);
 }
 
 #include "backend/appData.h"
@@ -72,11 +71,11 @@ ibValueRecordDataObjectHierarchyRef* ibValueMetaObjectCatalog::CreateObjectRefVa
 	ibValueRecordDataObjectCatalog* pDataRef = nullptr;
 	if (auto* cc = m_metaData->GetCompileCache()) {
 		if (!cc->FindCompileModule(m_propertyObjectModule->GetMetaObject(), pDataRef)) {
-			return ibValue::CreateAndPrepareValueRef<ibValueRecordDataObjectCatalog>(this, guid, mode);
+			return new ibValueRecordDataObjectCatalog(this, guid, mode);
 		}
 	}
 	else {
-		pDataRef = ibValue::CreateAndPrepareValueRef<ibValueRecordDataObjectCatalog>(this, guid, mode);
+		pDataRef = new ibValueRecordDataObjectCatalog(this, guid, mode);
 	}
 
 	return pDataRef;
@@ -91,11 +90,11 @@ ibSourceDataObject* ibValueMetaObjectCatalog::CreateSourceObject(const ibValueMe
 	case eFormFolder:
 		return CreateObjectValue(ibObjectMode::OBJECT_FOLDER);
 	case eFormList:
-		return ibValue::CreateAndPrepareValueRef<ibValueModelTreeDataObjectFolderRef>(this, metaObject->GetTypeForm(), ibValueModelTreeDataObjectFolderRef::LIST_ITEM_FOLDER);
+		return new ibValueModelTreeDataObjectFolderRef(this, metaObject->GetTypeForm(), ibValueModelTreeDataObjectFolderRef::LIST_ITEM_FOLDER);
 	case eFormSelect:
-		return ibValue::CreateAndPrepareValueRef<ibValueModelTreeDataObjectFolderRef>(this, metaObject->GetTypeForm(), ibValueModelTreeDataObjectFolderRef::LIST_ITEM_FOLDER, true);
+		return new ibValueModelTreeDataObjectFolderRef(this, metaObject->GetTypeForm(), ibValueModelTreeDataObjectFolderRef::LIST_ITEM_FOLDER, true);
 	case eFormFolderSelect:
-		return ibValue::CreateAndPrepareValueRef<ibValueModelTreeDataObjectFolderRef>(this, metaObject->GetTypeForm(), ibValueModelTreeDataObjectFolderRef::LIST_FOLDER, true);
+		return new ibValueModelTreeDataObjectFolderRef(this, metaObject->GetTypeForm(), ibValueModelTreeDataObjectFolderRef::LIST_FOLDER, true);
 	}
 
 	return nullptr;
@@ -127,7 +126,7 @@ ibBackendValueForm* ibValueMetaObjectCatalog::GetListForm(const wxString& strFor
 	return ibValueMetaObjectGenericData::CreateAndBuildForm(
 		strFormName,
 		ibValueMetaObjectCatalog::eFormList,
-		ownerControl, ibValue::CreateAndPrepareValueRef<ibValueModelTreeDataObjectFolderRef>(this, ibValueMetaObjectCatalog::eFormList, ibValueModelTreeDataObjectFolderRef::LIST_ITEM_FOLDER),
+		ownerControl, new ibValueModelTreeDataObjectFolderRef(this, ibValueMetaObjectCatalog::eFormList, ibValueModelTreeDataObjectFolderRef::LIST_ITEM_FOLDER),
 		formGuid
 	);
 }
@@ -137,7 +136,7 @@ ibBackendValueForm* ibValueMetaObjectCatalog::GetSelectForm(const wxString& strF
 	return ibValueMetaObjectGenericData::CreateAndBuildForm(
 		strFormName,
 		ibValueMetaObjectCatalog::eFormSelect,
-		ownerControl, ibValue::CreateAndPrepareValueRef<ibValueModelTreeDataObjectFolderRef>(this, ibValueMetaObjectCatalog::eFormSelect, ibValueModelTreeDataObjectFolderRef::LIST_ITEM, true),
+		ownerControl, new ibValueModelTreeDataObjectFolderRef(this, ibValueMetaObjectCatalog::eFormSelect, ibValueModelTreeDataObjectFolderRef::LIST_ITEM, true),
 		formGuid
 	);
 }
@@ -147,7 +146,7 @@ ibBackendValueForm* ibValueMetaObjectCatalog::GetFolderSelectForm(const wxString
 	return ibValueMetaObjectGenericData::CreateAndBuildForm(
 		strFormName,
 		ibValueMetaObjectCatalog::eFormFolderSelect,
-		ownerControl, ibValue::CreateAndPrepareValueRef<ibValueModelTreeDataObjectFolderRef>(this, ibValueMetaObjectCatalog::eFormSelect, ibValueModelTreeDataObjectFolderRef::LIST_FOLDER, true),
+		ownerControl, new ibValueModelTreeDataObjectFolderRef(this, ibValueMetaObjectCatalog::eFormSelect, ibValueModelTreeDataObjectFolderRef::LIST_FOLDER, true),
 		formGuid
 	);
 }
@@ -433,27 +432,27 @@ void ibValueMetaObjectCatalog::OnRemoveMetaForm(ibValueMetaObjectFormBase* metaF
 	if (metaForm->GetTypeForm() == ibValueMetaObjectCatalog::eFormObject
 		&& m_propertyDefFormObject->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormObject->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormObject->SetValue(wxNOT_FOUND);
 	}
 	else if (metaForm->GetTypeForm() == ibValueMetaObjectCatalog::eFormFolder
 		&& m_propertyDefFormFolder->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormFolder->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormFolder->SetValue(wxNOT_FOUND);
 	}
 	else if (metaForm->GetTypeForm() == ibValueMetaObjectCatalog::eFormList
 		&& m_propertyDefFormList->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormList->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormList->SetValue(wxNOT_FOUND);
 	}
 	else if (metaForm->GetTypeForm() == ibValueMetaObjectCatalog::eFormSelect
 		&& m_propertyDefFormSelect->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormSelect->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormSelect->SetValue(wxNOT_FOUND);
 	}
 	else if (metaForm->GetTypeForm() == ibValueMetaObjectCatalog::eFormFolderSelect
 		&& m_propertyDefFormFolderSelect->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormFolderSelect->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormFolderSelect->SetValue(wxNOT_FOUND);
 	}
 }
 

@@ -3,9 +3,10 @@
 
 #include <wx/wx.h>
 #include <wx/aui/aui.h>
-#include <wx/docview.h>
 #include <wx/splash.h>
 #include <wx/stc/stc.h>
+
+#include "frontend/docView/docView.h"   // forked ib* doc/view (replaces wx/docview.h)
 
 #include "backend/backend_mainFrame.h"
 #include "frontend/frontend.h"
@@ -13,10 +14,10 @@
 
 class ibMetaView;
 
-#define mainFrame            		 (ibFrontendDocMDIFrame::GetFrame())
-#define mainFrameCreate(frame)       (ibFrontendDocMDIFrame::InitFrame(new frame))
-#define mainFrameShow()				 (ibFrontendDocMDIFrame::ShowFrame())
-#define mainFrameDestroy()  		 (ibFrontendDocMDIFrame::DestroyFrame())
+#define mainFrame            		 (ibFrontendMainFrame::GetFrame())
+#define mainFrameCreate(frame)       (ibFrontendMainFrame::InitFrame(new frame))
+#define mainFrameShow()				 (ibFrontendMainFrame::ShowFrame())
+#define mainFrameDestroy()  		 (ibFrontendMainFrame::DestroyFrame())
 
 #include "objinspect/objinspect.h"
 
@@ -33,9 +34,9 @@ class ibMetaView;
 #define wxAUI_DEFAULT_COLOUR wxColour(41, 57, 85) 
 #define wxAUI_WHITE_COLOUR wxColour(255, 255, 255) 
 
-class FRONTEND_API ibFrontendDocMDIFrame :
+class FRONTEND_API ibFrontendMainFrame :
 	public ibBackendDocFrame, public wxAuiMDIParentFrame,
-	public wxDocParentFrameAnyBase {
+	public ibDocParentFrameAnyBase {
 public:
 
 	virtual wxMenu* GetDefaultMenu(int idMenu) const { return nullptr; }
@@ -136,7 +137,7 @@ public:
 	void UpdateManager() {
 		if (!m_callUpdateFrameManager) {
 			m_callUpdateFrameManager = true;
-			CallAfter(&ibFrontendDocMDIFrame::UpdateFrameManager);
+			CallAfter(&ibFrontendMainFrame::UpdateFrameManager);
 		}
 	}
 
@@ -171,7 +172,7 @@ protected:
 	// (Designer / Launcher / WebServer). Called from Show().
 	bool EnsureRuntime();
 
-	ibFrontendDocMDIFrame(const wxString& title,
+	ibFrontendMainFrame(const wxString& title,
 		const wxPoint& pos = wxDefaultPosition,
 		const wxSize& size = wxDefaultSize,
 		long style = wxDEFAULT_FRAME_STYLE,
@@ -185,14 +186,14 @@ protected:
 
 public:
 
-	virtual ~ibFrontendDocMDIFrame();
+	virtual ~ibFrontendMainFrame();
 
 	// Returns ibFrontendWindow* (typedef → wxWindow on desktop,
 	// ibWebWindow on web) so the signature reads the same across
 	// builds even though this static is desktop-only today. Keeps the
 	// door open for a shared signature if the web frame ever adopts
 	// the same factory entry point.
-	static ibFrontendWindow* CreateChildFrame(ibMetaView* view,
+	static ibFrontendWindow* CreateChildFrame(ibView* view,
 		const wxPoint& pos, const wxSize& size, long style = wxDEFAULT_FRAME_STYLE);
 
 	static ibObjectInspector* GetObjectInspector() {
@@ -201,10 +202,10 @@ public:
 		return nullptr;
 	}
 
-	static ibFrontendDocMDIFrame* GetFrame() { return s_instance; }
+	static ibFrontendMainFrame* GetFrame() { return s_instance; }
 
 	// Force the static appData instance to Init()
-	static void InitFrame(ibFrontendDocMDIFrame* mf);
+	static void InitFrame(ibFrontendMainFrame* mf);
 	static bool ShowFrame();
 
 	static void DestroyFrame();
@@ -219,8 +220,8 @@ public:
 	bool IsShownInspector();
 	void ShowInspector();
 
-	// Activate view 
-	void ActivateView(ibMetaView* view, bool activate = true);
+	// Activate view
+	void ActivateView(ibView* view, bool activate = true);
 
 protected:
 
@@ -242,7 +243,7 @@ protected:
 		void Refresh() { Repaint(); }
 	};
 
-	static ibFrontendDocMDIFrame* s_instance;
+	static ibFrontendMainFrame* s_instance;
 
 	// Bound at Initialize(). Drives AllowRun/AllowClose and any
 	// session-aware UI actions. Raw pointer — session outlives frame
@@ -285,8 +286,12 @@ public:
 		const wxString& name = wxStatusBarNameStr)
 		: wxStatusBar(parent, id, style, name)
 	{
-		wxStatusBar::SetBackgroundColour(wxAUI_DEFAULT_COLOUR);
-		wxStatusBar::SetForegroundColour(wxAUI_WHITE_COLOUR);
+		// Light dusty status bar — sits between the powder-blue
+		// workspace and the cream content panes; deep-blue text reads
+		// cleanly. Matches the interior-design palette (see
+		// luna_dockart.cpp).
+		wxStatusBar::SetBackgroundColour(wxColour(0xC8, 0xD6, 0xDF));   // #C8D6DF light dusty
+		wxStatusBar::SetForegroundColour(wxColour(0x3F, 0x5C, 0x77));   // #3F5C77 deep dusty blue
 
 		m_statusBarText = new wxStaticText(this, wxID_ANY, wxEmptyString, wxPoint(5, 5), wxDefaultSize, 0);
 		m_statusBarText->Show();
@@ -325,9 +330,25 @@ public:
 	virtual int FilterEvent(wxEvent& event) wxOVERRIDE { return Event_Skip; }
 };
 
-//pane 
+//pane
 #define wxAUI_PANE_METADATA wxT("metadataWindow")
 #define wxAUI_PANE_PROPERTY wxT("propertyWindow")
-#define wxAUI_PANE_BOTTOM	wxT("bottomWindow"	)
+#define wxAUI_PANE_BOTTOM   wxT("bottomWindow")
+#define wxAUI_PANE_HELP     wxT("syntaxHelperWindow")
+
+// Host-frame command ids that the editor and other frontend widgets
+// may post upward. Defined in a frontend header (not the designer
+// header) so frontend.dll → designer.exe stays a one-way link — the
+// editor's context-menu code (subphase 1.3) can reference these
+// without pulling in the downstream designer module. The numeric
+// values must not collide with wxStandardID or with the designer-
+// private id block in designer/mainFrame/mainFrameDesigner.h.
+enum {
+    wxID_FRONTEND_SYNTAX_HELPER        = wxID_HIGHEST + 4500,
+    wxID_FRONTEND_SYNTAX_HELPER_LOOKUP = wxID_HIGHEST + 4501,
+    // Values 4502+ reserved for unrelated frontend features
+    // (debug step shortcuts / plugin manager / plugin web pane) —
+    // landed in separate PRs.
+};
 
 #endif 

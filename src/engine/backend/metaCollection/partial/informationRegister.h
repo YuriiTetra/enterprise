@@ -1,11 +1,38 @@
-﻿#ifndef __INFORMATION_REGISTER_H__
+#ifndef __INFORMATION_REGISTER_H__
 #define __INFORMATION_REGISTER_H__
 
 #include "commonObject.h"
 #include "informationRegisterEnum.h"
+#include "backend/query/queryable.h"   // ibComputedRegisterQueryable<TReg> — shared base for the slice / balance / turnover virtual tables
+
+#include <memory>
+
+class ibValueMetaObjectInformationRegister;
+class ibSliceLastQueryable;
+class ibSliceFirstQueryable;
+
+// L4 virtual-table source descriptor for the information register's slices — templated on the
+// slice companion (ibSliceLastQueryable / ibSliceFirstQueryable). Owned by the register as a
+// field; registered under "<Register>.SliceLast" / ".SliceFirst". CreateQueryable BUILDS the
+// call-scoped companion from the params (as-of period, dimension filter) and OWNS it. Method
+// bodies are at the BOTTOM of this header (where the companions are complete).
+template <typename TSlice>
+class ibInfoRegisterSliceDescriptor : public ibQueryableSourceDescriptor
+{
+public:
+	ibInfoRegisterSliceDescriptor(ibValueMetaObjectInformationRegister* reg, const wxString& suffix)
+		: m_reg(reg), m_suffix(suffix) {}
+	wxString GetNamespace() const override;
+	wxString GetName() const override;
+	const ibBackendQueryable* CreateQueryable(ibValue** paParams, long lSizeArray) override;
+private:
+	ibValueMetaObjectInformationRegister* m_reg;
+	wxString                              m_suffix;
+	std::unique_ptr<TSlice>               m_companion;   // call-scoped, owned here
+};
 
 class ibValueMetaObjectInformationRegister : public ibValueMetaObjectRegisterData {
-	wxDECLARE_DYNAMIC_CLASS(ibValueMetaObjectInformationRegister);
+	public:
 private:
 	enum
 	{
@@ -28,7 +55,6 @@ private:
 
 public:
 	class ibValueMetaObjectRecordManager : public ibValueMetaObject {
-		wxDECLARE_DYNAMIC_CLASS(ibValueMetaObjectRecordManager);
 	public:
 		ibValueMetaObjectRecordManager() : ibValueMetaObject() {}
 	};
@@ -76,11 +102,11 @@ public:
 	//has record manager 
 	virtual bool HasRecordManager() const { return GetWriteRegisterMode() == ibWriteRegisterMode::eIndependent; }
 
-	//has recorder and period 
+	//has recorder and period
 	virtual bool HasPeriod() const { return GetPeriodicity() != ibPeriodicity::eNonPeriodic; }
 	virtual bool HasRecorder() const { return GetWriteRegisterMode() == ibWriteRegisterMode::eSubordinateRecorder; }
 
-	//get module object in compose object 
+	//get module object in compose object
 	virtual const ibValueMetaObjectModule* GetObjectModule() const { return m_propertyObjectModule->GetMetaObject(); }
 	virtual const ibValueMetaObjectCommonModule* GetManagerModule() const { return m_propertyManagerModule->GetMetaObject(); }
 
@@ -107,12 +133,16 @@ public:
 
 protected:
 
-	//get default attributes
-	virtual bool FillArrayObjectByPredefinedAttribute(std::vector<ibValueMetaObjectAttributeBase*>& array) const {
+	// Additive contract — IR's predefined attribute set depends on
+	// WriteRegisterMode + Periodicity (some IR variants are just (key,
+	// value) maps with no period/recorder). Base RegisterData is empty,
+	// so the chain call is a no-op; kept for consistency with the
+	// additive convention.
+	virtual bool FillArrayObjectByPredefinedAttribute(std::vector<ibValueMetaObjectAttributeBase*>& array) const override {
+		ibValueMetaObjectRegisterData::FillArrayObjectByPredefinedAttribute(array);
 
-		if (GetWriteRegisterMode() == ibWriteRegisterMode::eSubordinateRecorder) {
+		if (GetWriteRegisterMode() == ibWriteRegisterMode::eSubordinateRecorder)
 			array.emplace_back(m_propertyAttributeLineActive->GetMetaObject());
-		}
 
 		if (GetPeriodicity() != ibPeriodicity::eNonPeriodic ||
 			GetWriteRegisterMode() == ibWriteRegisterMode::eSubordinateRecorder) {
@@ -128,7 +158,7 @@ protected:
 	}
 
 	//get dimension keys 
-	virtual bool FillArrayObjectByDimention(
+	virtual bool FillArrayObjectByDimension(
 		std::vector<ibValueMetaObjectAttributeBase*>& array) const {
 
 		if (GetWriteRegisterMode() != ibWriteRegisterMode::eSubordinateRecorder) {
@@ -218,22 +248,115 @@ private:
 	ibPropertyEnum<ibValueEnumPeriodicity>* m_propertyPeriodicity = ibPropertyObject::CreateProperty<ibPropertyEnum<ibValueEnumPeriodicity>>(m_categoryData, wxT("Periodicity"), _("Periodicity"), ibPeriodicity::eNonPeriodic);
 	ibPropertyEnum<ibValueEnumWriteRegisterMode>* m_propertyWriteMode = ibPropertyObject::CreateProperty<ibPropertyEnum<ibValueEnumWriteRegisterMode>>(m_categoryData, wxT("WriteMode"), _("Write mode"), ibWriteRegisterMode::eIndependent);
 
+	// THE one place the period-slice is computed — the register's OWN SQL knowledge
+	// (table / dimensions / the MAX/MIN self-join). The slice companion queryable
+	// (ibSliceQueryable, a friend) calls it through m_reg; the period bound
+	// parameterises it: last = MAX / "<=", first = MIN / ">=". Returns the slice table.
+	ibQueryRamTable ComputeSlice(const ibValue& cPeriod, const ibValue& cFilter,
+	                             const wxString& aggregateFn, const wxString& compareOp) const;
+
+	friend class ibSliceQueryable;
 	friend class ibValueRecordSetObjectInformationRegister;
 	friend class ibValueRecordManagerObjectInformationRegister;
 
 	friend class ibMetaData;
+
+	// L4 custom virtual-table descriptors — registered alongside the base records descriptor
+	// (RegisterData::m_queryable) on run, dropped on close. Reached as Information
+	// Register.<Name>.SliceLast / .SliceFirst.
+	ibInfoRegisterSliceDescriptor<ibSliceLastQueryable>  m_sliceLast { this, wxT("SliceLast") };
+	ibInfoRegisterSliceDescriptor<ibSliceFirstQueryable> m_sliceFirst{ this, wxT("SliceFirst") };
 };
+
+//********************************************************************************************
+//*    Slice companion queryables — call-scoped relations handed to L3 via From()             *
+//********************************************************************************************
+// A slice is a SELF-CONTAINED, call-scoped relation: its own filters — the as-of
+// PERIOD and the dimension FILTER — ride in the CONSTRUCTOR ("the filter before the
+// Where"). You construct one, hand it to From(), and L3 reads it like any source
+// (filter further, join it) — it never learns the rows are computed in RAM. The slice
+// returns the register's REAL records, so the eight navigation methods forward to the
+// register; the only degree of freedom is the period bound (last = MAX / "<=", first =
+// MIN / ">="), fixed by the two derived types. The compute itself is the register's own
+// ComputeSlice. A slice does NOT persist on the register — it lives for the one call
+// that built it. See docs/query-language-arc.md §22.4d.
+
+// base — shared slice logic; abstract (the period bound is the derived's job). The
+// RAM-virtual-table plumbing + the register-forwarding navigation live in the shared
+// ibComputedRegisterQueryable base; the slice adds the period bound + ComputeRows.
+class BACKEND_API ibSliceQueryable : public ibComputedRegisterQueryable<ibValueMetaObjectInformationRegister> {
+public:
+	ibSliceQueryable(const ibValueMetaObjectInformationRegister* reg,
+	                 const ibValue& period = ibValue(), const ibValue& filter = ibValue())
+		: ibComputedRegisterQueryable(reg), m_period(period), m_filter(filter) {}
+
+	virtual wxString AggregateFn() const = 0;   // "MAX" (last) / "MIN" (first)
+	virtual wxString CompareOp()   const = 0;   // "<="  (last) / ">="  (first)
+
+	// the slice's rows — computed from the ctor filters through the register's ComputeSlice.
+	virtual ibQueryRamTable ComputeRows(const std::vector<ibQueryCondition>& extra) const override;
+
+protected:
+	ibValue m_period;   // as-of date (the "filter before Where")
+	ibValue m_filter;   // dimension-name -> value structure
+};
+
+// last slice — most recent record on or before the date.
+class BACKEND_API ibSliceLastQueryable : public ibSliceQueryable {
+public:
+	ibSliceLastQueryable(const ibValueMetaObjectInformationRegister* reg,
+	                     const ibValue& period = ibValue(), const ibValue& filter = ibValue())
+		: ibSliceQueryable(reg, period, filter) {}
+	virtual wxString AggregateFn() const override { return wxT("MAX"); }
+	virtual wxString CompareOp()   const override { return wxT("<="); }
+};
+
+// first slice — earliest record on or after the date.
+class BACKEND_API ibSliceFirstQueryable : public ibSliceQueryable {
+public:
+	ibSliceFirstQueryable(const ibValueMetaObjectInformationRegister* reg,
+	                      const ibValue& period = ibValue(), const ibValue& filter = ibValue())
+		: ibSliceQueryable(reg, period, filter) {}
+	virtual wxString AggregateFn() const override { return wxT("MIN"); }
+	virtual wxString CompareOp()   const override { return wxT(">="); }
+};
+
+// ibInfoRegisterSliceDescriptor — method bodies (the register + slice companions are complete here).
+template <typename TSlice>
+wxString ibInfoRegisterSliceDescriptor<TSlice>::GetNamespace() const
+{
+	return ibValue::GetNameObjectFromID(m_reg->GetClassType());
+}
+
+template <typename TSlice>
+wxString ibInfoRegisterSliceDescriptor<TSlice>::GetName() const
+{
+	return m_reg->GetName() + wxT(".") + m_suffix;
+}
+
+template <typename TSlice>
+const ibBackendQueryable* ibInfoRegisterSliceDescriptor<TSlice>::CreateQueryable(ibValue** paParams, long lSizeArray)
+{
+	// build the call-scoped slice companion from the params (as-of period, dimension filter) and own it
+	const ibValue period = (lSizeArray > 0 && paParams != nullptr && paParams[0] != nullptr) ? *paParams[0] : ibValue();
+	const ibValue filter = (lSizeArray > 1 && paParams != nullptr && paParams[1] != nullptr) ? *paParams[1] : ibValue();
+	m_companion = std::make_unique<TSlice>(m_reg, period, filter);
+	return m_companion.get();
+}
 
 //********************************************************************************************
 //*                                      Object                                              *
 //********************************************************************************************
 
 class ibValueRecordSetObjectInformationRegister : public ibValueRecordSetObject {
+	public:
 	ibValueRecordSetObjectInformationRegister(const ibValueMetaObjectInformationRegister* metaObject, const ibUniqueKeyPair& uniqueKey = wxNullUniquePairKey) :
 		ibValueRecordSetObject(metaObject, uniqueKey) {
+		m_members.Bind(this, &ibValueRecordSetObjectInformationRegister::FillMembers);
 	}
 	ibValueRecordSetObjectInformationRegister(const ibValueRecordSetObjectInformationRegister& source) :
 		ibValueRecordSetObject(source) {
+		m_members.Bind(this, &ibValueRecordSetObjectInformationRegister::FillMembers);
 	}
 public:
 
@@ -242,14 +365,14 @@ public:
 		return new ibValueRecordSetObjectInformationRegister(*this);
 	}
 
-	virtual bool WriteRecordSet(bool replace = true, bool clearTable = true);
-	virtual bool DeleteRecordSet();
+	// WriteRecordSet / DeleteRecordSet inherited from
+	// ibValueRecordSetObject (Phase B template-method).
 
 	//****************************************************************************
 	//*                              Support methods                             *
 	//****************************************************************************
 
-	virtual void PrepareNames() const;
+	void FillMembers(ibMemberTable& helper) const;
 
 	//****************************************************************************
 	//*                              Override attribute                          *
@@ -265,14 +388,16 @@ protected:
 };
 
 class ibValueRecordManagerObjectInformationRegister : public ibValueRecordManagerObject {
-public:
+	public:
 	ibValueRecordManagerObjectInformationRegister(const ibValueMetaObjectInformationRegister* metaObject, const ibUniqueKeyPair& uniqueKey = wxNullUniquePairKey) :
 		ibValueRecordManagerObject(metaObject, uniqueKey)
 	{
+		m_members.Bind(this, &ibValueRecordManagerObjectInformationRegister::FillMembers);
 	}
 	ibValueRecordManagerObjectInformationRegister(const ibValueRecordManagerObjectInformationRegister& source) :
 		ibValueRecordManagerObject(source)
 	{
+		m_members.Bind(this, &ibValueRecordManagerObjectInformationRegister::FillMembers);
 	}
 	virtual ibValueRecordManagerObject* CopyRegister(bool showValue = false) {
 		ibValueRecordManagerObject* objectRef = CopyRegisterValue();
@@ -287,7 +412,7 @@ public:
 	//*                              Support methods                             *
 	//****************************************************************************
 
-	virtual void PrepareNames() const;
+	void FillMembers(ibMemberTable& helper) const;
 
 	//****************************************************************************
 	//*                              Override attribute                          *

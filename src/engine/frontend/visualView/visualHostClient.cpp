@@ -29,7 +29,7 @@ ibVisualHostClient::~ibVisualHostClient()
 // Push the form's caption to the owning tab (ibWebDocChildFrame) so
 // /session reports the new title. The host is parented under the tab
 // via SetParent; cast-and-SetTitle is the web analogue of desktop's
-// wxDocument::SetTitle chain.
+// ibDocument::SetTitle chain.
 void ibVisualHostClient::SetCaption(const wxString& strCaption)
 {
 	if (auto* tab = dynamic_cast<ibWebDocChildFrame*>(GetParent()))
@@ -47,10 +47,11 @@ void ibVisualHostClient::SetOrientation(int orient)
 }
 
 #else  // !OES_USE_WEB
-// Desktop-only implementation: wxScrolledCanvas-hosted form, MDI tab,
+// Desktop-only implementation: wxScrolledCanvas-hosted form, tab,
 // wxDocView Doc/View machinery.
 
-ibVisualHostClient::ibVisualHostClient(ibFormVisualDocument* document, ibValueForm* valueForm, wxWindow* parent) :
+ibVisualHostClient::ibVisualHostClient(ibFormVisualDocument* document, ibValueForm* valueForm, ibFrontendWindow* parent) :
+	// On desktop ibFrontendWindow == wxWindow, so this just forwards.
 	ibVisualHost(parent, wxID_ANY, wxDefaultPosition, wxDefaultSize),
 	m_document(document),
 	m_valueForm(valueForm),

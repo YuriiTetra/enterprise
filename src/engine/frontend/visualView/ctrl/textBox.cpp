@@ -4,7 +4,6 @@
 //*                           IMPLEMENT_DYNAMIC_CLASS                               *
 //***********************************************************************************
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueTextBox, ibValueWindow);
 
 //***********************************************************************************
 //*                                 Value Notebook                                  *
@@ -75,11 +74,6 @@ bool ibValueTextBox::SaveData(ibWriterMemory& writer)
 }
 
 //***********************************************************************************
-
-void ibValueTextBox::PrepareNames() const
-{
-	ibValueFrame::PrepareNames();
-}
 
 bool ibValueTextBox::SetPropVal(const long lPropNum, const ibValue& varPropVal)
 {

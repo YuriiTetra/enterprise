@@ -7,13 +7,13 @@ void ibDebuggerClientBridgeDesigner::OnSessionStart(wxSocketClient* sock)
 		for (auto& doc : docManager->GetDocumentsVector()) {
 			ibMetaDocument* metaDoc = dynamic_cast<ibMetaDocument*>(doc);
 			if (metaDoc != nullptr) {
-				ibValueModulibDocument* foundedDoc = dynamic_cast<ibValueModulibDocument*>(metaDoc);
+				ibValueModuleDocument* foundedDoc = dynamic_cast<ibValueModuleDocument*>(metaDoc);
 				if (foundedDoc != nullptr) {
 					foundedDoc->SetCurrentLine(wxNOT_FOUND, false);
 					foundedDoc->SetToolTip(wxEmptyString);
 				}
 				for (auto& child_doc : metaDoc->GetChild()) {
-					ibValueModulibDocument* foundedDoc = dynamic_cast<ibValueModulibDocument*>(child_doc);
+					ibValueModuleDocument* foundedDoc = dynamic_cast<ibValueModuleDocument*>(child_doc);
 					if (foundedDoc != nullptr) {
 						foundedDoc->SetCurrentLine(wxNOT_FOUND, false);
 						foundedDoc->SetToolTip(wxEmptyString);
@@ -32,13 +32,13 @@ void ibDebuggerClientBridgeDesigner::OnSessionEnd(wxSocketClient* sock)
 		for (auto& doc : docManager->GetDocumentsVector()) {
 			ibMetaDocument* metaDoc = dynamic_cast<ibMetaDocument*>(doc);
 			if (metaDoc != nullptr) {
-				ibValueModulibDocument* foundedDoc = dynamic_cast<ibValueModulibDocument*>(metaDoc);
+				ibValueModuleDocument* foundedDoc = dynamic_cast<ibValueModuleDocument*>(metaDoc);
 				if (foundedDoc != nullptr) {
 					foundedDoc->SetCurrentLine(wxNOT_FOUND, false);
 					foundedDoc->SetToolTip(wxEmptyString);
 				}
 				for (auto& child_doc : metaDoc->GetChild()) {
-					ibValueModulibDocument* foundedDoc = dynamic_cast<ibValueModulibDocument*>(child_doc);
+					ibValueModuleDocument* foundedDoc = dynamic_cast<ibValueModuleDocument*>(child_doc);
 					if (foundedDoc != nullptr) {
 						foundedDoc->SetCurrentLine(wxNOT_FOUND, false);
 						foundedDoc->SetToolTip(wxEmptyString);
@@ -70,7 +70,7 @@ void ibDebuggerClientBridgeDesigner::OnEnterLoop(wxSocketClient* sock, const ibD
 				);
 			if (foundedDoc == nullptr) {
 				foundedDoc = dynamic_cast<ibMetaDataDocument*>(
-					docManager->CreateDocument(data.m_fileName, wxDOC_SILENT)
+					docManager->CreateDocument(data.m_fileName, ibDOC_SILENT)
 					);
 			}
 			if (foundedDoc != nullptr) {
@@ -95,7 +95,7 @@ void ibDebuggerClientBridgeDesigner::OnLeaveLoop(wxSocketClient* sock, const ibD
 			if (metaTree != nullptr) {
 				ibValueMetaObject* foundedMeta = activeMetaData->FindAnyObjectByFilter(moduleName, true);
 				if (foundedMeta != nullptr) {
-					ibValueModulibDocument* foundedDoc = dynamic_cast<ibValueModulibDocument*>(metaTree->GetDocument(foundedMeta));
+					ibValueModuleDocument* foundedDoc = dynamic_cast<ibValueModuleDocument*>(metaTree->GetDocument(foundedMeta));
 					if (foundedDoc != nullptr) {
 						foundedDoc->SetCurrentLine(data.m_line, false);
 						foundedDoc->SetToolTip(wxEmptyString);
@@ -106,13 +106,13 @@ void ibDebuggerClientBridgeDesigner::OnLeaveLoop(wxSocketClient* sock, const ibD
 		else if (!data.m_fileName.IsEmpty()) {
 			ibMetaDataDocument* foundedDoc = dynamic_cast<ibMetaDataDocument*>(docManager->FindDocumentByPath(data.m_fileName));
 			if (foundedDoc != nullptr) {
-				const ibMetaData* foundedMetadata = foundedDoc->GetMetaData();
+				ibMetaData* foundedMetadata = foundedDoc->GetMetaData();
 				wxASSERT(foundedMetadata);
 				const ibBackendMetadataTree* metaTree = foundedMetadata->GetMetaTree();
 				if (metaTree != nullptr) {
 					ibValueMetaObject* foundedMeta = foundedMetadata->FindAnyObjectByFilter(moduleName, true);
 					if (foundedMeta != nullptr) {
-						ibValueModulibDocument* foundedDoc = dynamic_cast<ibValueModulibDocument*>(metaTree->GetDocument(foundedMeta));
+						ibValueModuleDocument* foundedDoc = dynamic_cast<ibValueModuleDocument*>(metaTree->GetDocument(foundedMeta));
 						if (foundedDoc != nullptr) {
 							foundedDoc->SetCurrentLine(data.m_line, false);
 							foundedDoc->SetToolTip(wxEmptyString);
@@ -140,7 +140,7 @@ void ibDebuggerClientBridgeDesigner::OnAutoComplete(const ibDebugAutoCompleteDat
 			if (metaTree != nullptr) {
 				ibValueMetaObject* foundedMeta = activeMetaData->FindAnyObjectByFilter(moduleName, true);
 				if (foundedMeta != nullptr) {
-					ibValueModulibDocument* foundedDoc = static_cast<ibValueModulibDocument*>(metaTree->GetDocument(foundedMeta));
+					ibValueModuleDocument* foundedDoc = static_cast<ibValueModuleDocument*>(metaTree->GetDocument(foundedMeta));
 					if (foundedDoc != nullptr) {
 						foundedDoc->ShowAutoComplete(data);
 					}
@@ -150,13 +150,13 @@ void ibDebuggerClientBridgeDesigner::OnAutoComplete(const ibDebugAutoCompleteDat
 		else if (!data.m_fileName.IsEmpty()) {
 			const ibMetaDataDocument* foundedDoc = dynamic_cast<ibMetaDataDocument*>(docManager->FindDocumentByPath(data.m_fileName));
 			if (foundedDoc != nullptr) {
-				const ibMetaData* metaData = foundedDoc->GetMetaData();
+				ibMetaData* metaData = foundedDoc->GetMetaData();
 				wxASSERT(metaData);
 				const ibBackendMetadataTree* metaTree = metaData->GetMetaTree();
 				if (metaTree != nullptr) {
 					ibValueMetaObject* foundedMeta = metaData->FindAnyObjectByFilter(moduleName, true);
 					if (foundedMeta != nullptr) {
-						ibValueModulibDocument* foundedDoc = static_cast<ibValueModulibDocument*>(metaTree->GetDocument(foundedMeta));
+						ibValueModuleDocument* foundedDoc = static_cast<ibValueModuleDocument*>(metaTree->GetDocument(foundedMeta));
 						if (foundedDoc != nullptr) {
 							foundedDoc->ShowAutoComplete(data);
 						}
@@ -183,11 +183,11 @@ void ibDebuggerClientBridgeDesigner::OnMessageFromServer(const ibDebugLineData& 
 				);
 			if (foundedDoc == nullptr) {
 				foundedDoc = dynamic_cast<ibMetaDataDocument*>(
-					docManager->CreateDocument(data.m_fileName, wxDOC_SILENT)
+					docManager->CreateDocument(data.m_fileName, ibDOC_SILENT)
 					);
 			}
 			if (foundedDoc != nullptr) {
-				const ibMetaData* metaData = foundedDoc->GetMetaData();
+				ibMetaData* metaData = foundedDoc->GetMetaData();
 				wxASSERT(metaData);
 				ibBackendMetadataTree* metaTree = metaData->GetMetaTree();
 				wxASSERT(metaTree);
@@ -209,8 +209,8 @@ void ibDebuggerClientBridgeDesigner::OnSetToolTip(const ibDebugExpressionData& d
 			if (metaTree != nullptr) {
 				ibValueMetaObject* foundedMeta = activeMetaData->FindAnyObjectByFilter(moduleName, true);
 				if (foundedMeta != nullptr) {
-					ibValueModulibDocument* foundedDoc =
-						static_cast<ibValueModulibDocument*>(metaTree->GetDocument(foundedMeta));
+					ibValueModuleDocument* foundedDoc =
+						static_cast<ibValueModuleDocument*>(metaTree->GetDocument(foundedMeta));
 					if (foundedDoc != nullptr) {
 						foundedDoc->SetToolTip(resultStr);
 					}
@@ -222,14 +222,14 @@ void ibDebuggerClientBridgeDesigner::OnSetToolTip(const ibDebugExpressionData& d
 				docManager->FindDocumentByPath(data.m_fileName)
 				);
 			if (foundedDoc != nullptr) {
-				const ibMetaData* metaData = foundedDoc->GetMetaData();
+				ibMetaData* metaData = foundedDoc->GetMetaData();
 				wxASSERT(metaData);
 				const ibBackendMetadataTree* metaTree = metaData->GetMetaTree();
 				if (metaTree != nullptr) {
 					ibValueMetaObject* foundedMeta = metaData->FindAnyObjectByFilter(moduleName, true);
 					if (foundedMeta != nullptr) {
-						ibValueModulibDocument* foundedDoc =
-							static_cast<ibValueModulibDocument*>(metaTree->GetDocument(foundedMeta));
+						ibValueModuleDocument* foundedDoc =
+							static_cast<ibValueModuleDocument*>(metaTree->GetDocument(foundedMeta));
 						if (foundedDoc != nullptr) {
 							foundedDoc->SetToolTip(resultStr);
 						}

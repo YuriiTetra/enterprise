@@ -6,7 +6,7 @@ This file gives an AI assistant (Claude Code or similar) the context needed to w
 
 ## What This Project Is
 
-**Open Enterprise Solutions (OES)** is a C++17 cross-platform low-code enterprise application platform, conceptually similar to 1C:Enterprise. It lets developers define business applications through metadata (object types, forms, modules) and a built-in scripting language, without writing low-level code.
+**Open Enterprise Solutions (OES)** is a C++17 cross-platform low-code enterprise application platform. It lets developers define business applications through metadata (object types, forms, modules) and a built-in scripting language, without writing low-level code.
 
 The runtime executes compiled bytecode, renders forms through wxWidgets, and stores all application data in a relational database (Firebird by default).
 
@@ -35,8 +35,11 @@ enterprise/
 ├── ConfigurationDefs.props  # Per-configuration preprocessor defines
 ├── CLAUDE.md                # This file
 ├── docs/
+│   ├── ai-context.md         # READ FIRST if you are an AI generating metadata / scripts
 │   ├── ARCHITECTURE.md
-│   └── BUILD.md
+│   ├── BUILD.md
+│   ├── ui-palette.md         # Interior-design palette — source of truth for UI colours
+│   └── configuration-compare.md  # Compare/Merge feature — walker, model, Apply paths
 └── src/
     ├── 3rdparty/wxWidgets/  # Submodule
     └── engine/
@@ -47,7 +50,6 @@ enterprise/
         ├── launcher/        # launcher.exe  (connection chooser)
         ├── daemon/          # daemon.exe    (background service)
         ├── codeRunner/      # codeRunner.exe
-        ├── classChecker/    # classChecker.exe
         └── simplePlugin/    # simplePlugin.dll (example)
 ```
 
@@ -67,11 +69,11 @@ All database access goes through the abstract `ibDatabaseLayer` interface (`src/
 
 ### 2a. ibNumber — exact-decimal lazy-grow
 
-`ibNumber` (`src/engine/backend/number.h`) is the numeric storage type used by `ibValue::m_fData`. It is **not** a typedef for ttmath::Big — that dependency was removed; the class is self-contained.
+`ibNumber` (`src/engine/backend/fnumber.h`) is the numeric storage type used by `ibValue::m_fData`. It is **not** a typedef for ttmath::Big — that dependency was removed; the class is self-contained.
 
 - `sizeof(ibNumber) == 8` always. Single tagged `uint64_t`: bit 0 = tag, bits [16:1] = exp10, bits [63:17] = 47-bit signed mantissa. Most values stay inline (immediate tier).
 - Heap tier: `BigImpl { std::vector<uint32_t> limbs; bool negative; int32_t exp; }` — exact decimal, magnitude grows by demand. Supports 200+ fractional digits (1С-style precision).
-- Self-contained: no ttmath dependency. Schoolbook Add/Sub/Mul + base-2 long-division Div live in `number.cpp`. MSVC x86/x64 use `_addcarry_u32`/`_subborrow_u32` intrinsics; portable fallback elsewhere.
+- Self-contained: no ttmath dependency. Schoolbook Add/Sub/Mul + base-2 long-division Div live in `fnumber.cpp`. MSVC x86/x64 use `_addcarry_u32`/`_subborrow_u32` intrinsics; portable fallback elsewhere.
 - Buffer / wire: `wxMemoryBuffer GetBuffer()` plus `bool GetBuffer(ibWriterMemory&)` / `bool SetBuffer(const ibReaderMemory&)` — chunk-encapsulated I/O with internal `kIbNumberChunk` ID. Compact-zero encoding: zero produces 0-byte buffer, no allocation.
 - 128-bit raw: `To128Bytes(uint8_t[16])` / `From128Bytes` for Firebird SQL_INT128 columns.
 - Tests: `enterprise/tests/test_number.cpp` (gtest). 111/111 pass at landing.
@@ -295,7 +297,7 @@ All 11 business object types with: attributes (full type qualifiers), tabular se
 
 - **Opcodes:** defined in `src/engine/backend/compiler/codeDef.h` as `OPER_*` enumerators. Call-family: `OPER_CALL` (stack-frame named call), `OPER_CALL_CLOSURE` (named call with heap-promoted frame — callee has an inner lambda capturing locals), `OPER_CALL_METHOD` (per-class method dispatched by name string), `OPER_CALL_LINQ` (universal pipeline op dispatched by `ibLinqMethod` enum id, no string lookup), `OPER_CALL_LAMBDA` (dynamic call — target read from a slot at runtime, must wrap an `ibValueFunction`). Lambda body fences `OPER_LFUNC` / `OPER_ENDLFUNC`; materialise via `OPER_FUNC_PTR`
 - **Keywords:** 43, defined as `KEY_*` enumerators in the same file
-- **Built-in functions:** 91, registered in `ibSystemManager` (`src/engine/backend/system/systemManager.cpp`)
+- **Built-in functions:** ~93, registered in `ibSystemManager` (`src/engine/backend/system/systemManager.cpp`); count drifts as features land — grep `AppendFunc\|AppendProc` for the live total
 - **Syntax modes:** VES (`If…Then…EndIf`, Visual-Basic-style with 1С/BSL mix) and CES (`if (…) { … }`, C-flavoured); both compile to the same bytecode. Mode is process-global on `ibCompileCode::SetCodeStyle()` / `GetCodeStyle()`. **CES is the default** for new configurations (2026-05-10); existing serialised configs preserve their stored Syntax. Wire token in metadata enum still reads `vbs` for back-compat — user-visible label is `ves`.
 - **Anonymous functions:** `Function(args) ... EndFunction` and `Procedure(args) ... EndProcedure` (or CES `Function(args) { … }`) work as expressions — assignable to slots, callable through variables. Backed by `ibValueFunction` (inline class in `procUnit.cpp` near `ibValueIterator`, CLSID `VL_FUNC`). Lambda's compile-context kind is `RETURN_LAMBDA`. Eval-in-lambda resolves outer frames via splice in `CompileExpression` (lambda-shim's `m_pppArrayList[1..]` → eval's `[2..]`). No closure capture yet — outer-function locals fail with "undefined identifier" at compile. See `docs/lambda.md`.
 - **Debugger port:** 1650 (`defaultDebuggerPort` in `src/engine/backend/debugger/debugDefs.h`)

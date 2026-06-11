@@ -1,5 +1,6 @@
 #include "firebirdParameter.h"
 #include "firebirdDatabaseLayer.h"
+#include "firebirdBlobCompression.h"
 #include "backend/databaseLayer/databaseLayerException.h"
 
 // ctor
@@ -179,10 +180,20 @@ ibDatatabaseParameterFirebird::ibDatatabaseParameterFirebird(ibInterfaceFirebird
 	int nType = (m_pParameter->sqltype & ~1);
 
 	if (nType == SQL_BLOB) {
-		// Just copy the data into the memory buffer for now.  We'll move the data over to the blob in the call to ResetBlob
-		void* pBuffer = m_BufferValue.GetWriteBuf(nDataLength);
-		memcpy(pBuffer, pData, nDataLength);
-		m_nBufferLength = nDataLength;
+		// Wrap with our OESC-magic header. The wrap step decides
+		// whether to zlib-compress the body (size threshold + worth-it
+		// ratio) or store raw under the header. Either way the result
+		// is what ends up on disk via ResetBlob's putSegment loop.
+		// Read path (firebirdResultSet::GetResultBlob) detects the
+		// magic and decompresses transparently; legacy BLOBs that
+		// pre-date this code path have no magic and pass through
+		// untouched.
+		wxMemoryBuffer wrapped = ibFirebirdBlobCompression::Wrap(pData, nDataLength);
+		const size_t wrappedSize = wrapped.GetDataLen();
+		void* pBuffer = m_BufferValue.GetWriteBuf(wrappedSize);
+		memcpy(pBuffer, wrapped.GetData(), wrappedSize);
+		m_BufferValue.UngetWriteBuf(wrappedSize);
+		m_nBufferLength = static_cast<long unsigned int>(wrappedSize);
 	}
 	else if (nType == SQL_TEXT) {
 		// Fixed-length CHAR / BINARY column: raw bytes go straight into
@@ -230,14 +241,12 @@ bool ibDatatabaseParameterFirebird::ResetBlob(isc_db_handle database, isc_tr_han
 	int nReturn = m_pInterface->GetIscCreateBlob2()(status, &database, &transaction, &m_pBlob, &m_BlobId, 0, NULL);
 	if (nReturn != 0)
 	{
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-		long nSqlCode = m_pInterface->GetIscSqlcode()(status);
-		ibDatabaseLayerException error(ibDatabaseLayerFirebird::TranslateErrorCode(nSqlCode),
+		const long nSqlCode = m_pInterface->GetIscSqlcode()(status);
+		ibDatabaseLayerException::Throw(
+			ibBackendDatabaseException::Kind::Unknown,
+			ibDatabaseLayerFirebird::TranslateErrorCode(nSqlCode),
+			/*sqlState*/ wxEmptyString,
 			ibDatabaseLayerFirebird::TranslateErrorCodeToString(m_pInterface, nSqlCode, status));
-
-		throw error;
-#endif
-		//isc_print_status(status);
 		return false;
 	}
 
@@ -249,15 +258,12 @@ bool ibDatatabaseParameterFirebird::ResetBlob(isc_db_handle database, isc_tr_han
 		nReturn = m_pInterface->GetIscPutSegment()(status, &m_pBlob, segLen, dataPtr);
 		if (nReturn != 0)
 		{
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-			long nSqlCode = m_pInterface->GetIscSqlcode()(status);
-			ibDatabaseLayerException error(ibDatabaseLayerFirebird::TranslateErrorCode(nSqlCode),
+			const long nSqlCode = m_pInterface->GetIscSqlcode()(status);
+			ibDatabaseLayerException::Throw(
+				ibBackendDatabaseException::Kind::Unknown,
+				ibDatabaseLayerFirebird::TranslateErrorCode(nSqlCode),
+				/*sqlState*/ wxEmptyString,
 				ibDatabaseLayerFirebird::TranslateErrorCodeToString(m_pInterface, nSqlCode, status));
-
-			throw error;
-#endif
-
-			//isc_print_status(status);
 			return false;
 		}
 
@@ -269,15 +275,12 @@ bool ibDatatabaseParameterFirebird::ResetBlob(isc_db_handle database, isc_tr_han
 
 	if (nReturn != 0)
 	{
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-		long nSqlCode = m_pInterface->GetIscSqlcode()(status);
-		ibDatabaseLayerException error(ibDatabaseLayerFirebird::TranslateErrorCode(nSqlCode),
+		const long nSqlCode = m_pInterface->GetIscSqlcode()(status);
+		ibDatabaseLayerException::Throw(
+			ibBackendDatabaseException::Kind::Unknown,
+			ibDatabaseLayerFirebird::TranslateErrorCode(nSqlCode),
+			/*sqlState*/ wxEmptyString,
 			ibDatabaseLayerFirebird::TranslateErrorCodeToString(m_pInterface, nSqlCode, status));
-
-		throw error;
-#endif
-
-		//isc_print_status(status);
 		return false;
 	}
 

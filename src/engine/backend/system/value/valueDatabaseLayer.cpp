@@ -9,9 +9,6 @@
 #include "backend/session/session.h"
 
 //////////////////////////////////////////////////////////////////////
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueDatabaseLayer, ibValue);
-
-ibValue::ibValueMethodHelper ibValueDatabaseLayer::m_methodHelper;
 
 enum
 {
@@ -21,7 +18,7 @@ enum
 };
 
 ibValueDatabaseLayer::ibValueDatabaseLayer() :
-	ibValue(ibValueTypes::TYPE_VALUE)
+	ibValueStaticMembers(ibValueTypes::TYPE_VALUE)
 {
 }
 
@@ -29,13 +26,11 @@ ibValueDatabaseLayer::~ibValueDatabaseLayer()
 {
 }
 
-void ibValueDatabaseLayer::PrepareNames() const
+void ibValueDatabaseLayer_BindNames(ibValue::ibMemberTable& helper, const ibValue* /*ctx*/)
 {
-	m_methodHelper.ClearHelper();
-
-	m_methodHelper.AppendFunc(wxT("PrepareStatement"), 1, wxT("PrepareStatement(string: query, ...)"));
-	m_methodHelper.AppendFunc(wxT("RunQuery"), 1, wxT("RunQuery(string: query, ...)"));
-	m_methodHelper.AppendFunc(wxT("RunQueryWithResults"), 1, wxT("RunQueryWithResults(string: query, ...)"));
+	helper.AppendFunc(wxT("PrepareStatement"), 1, wxT("PrepareStatement(string: query, ...)"));
+	helper.AppendFunc(wxT("RunQuery"), 1, wxT("RunQuery(string: query, ...)"));
+	helper.AppendFunc(wxT("RunQueryWithResults"), 1, wxT("RunQueryWithResults(string: query, ...)"));
 }
 
 #include "backend/backend_exception.h"
@@ -51,11 +46,11 @@ bool ibValueDatabaseLayer::CallAsFunc(const long lMethodNum, ibValue& pvarRetVal
 				ibBackendCoreException::Error(ibBackendCoreException::GetLastError());
 				return false;
 			}
-			pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValuePreparedStatement>(preparedStatement);
+			pvarRetValue = new ibValuePreparedStatement(preparedStatement);
 			return true;
 		}
 
-		pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValuePreparedStatement>();
+		pvarRetValue = new ibValuePreparedStatement();
 		return true;
 	}
 	else if (lMethodNum == eRunQuery)
@@ -73,11 +68,11 @@ bool ibValueDatabaseLayer::CallAsFunc(const long lMethodNum, ibValue& pvarRetVal
 				ibBackendCoreException::Error(ses_query->GetErrorMessage());
 				return false;
 			}
-			pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueResultSet>(resultSet);
+			pvarRetValue = new ibValueResultSet(resultSet);
 			return true;
 		}
 
-		pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueResultSet>();
+		pvarRetValue = new ibValueResultSet();
 		return true;
 	}
 

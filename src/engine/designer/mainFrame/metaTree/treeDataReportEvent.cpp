@@ -194,7 +194,7 @@ void ibDataReportTree::ibDataReportTreeCtrl::OnPasteItem(wxCommandEvent &event)
 	event.Skip();
 }
 
-#include "frontend/docView/docManager.h"
+#include "frontend/docView/docView.h"
 #include "frontend/mainFrame/mainFrameChild.h"
 
 void ibDataReportTree::ibDataReportTreeCtrl::OnSetFocus(wxFocusEvent& event)
@@ -208,9 +208,9 @@ void ibDataReportTree::ibDataReportTreeCtrl::OnSetFocus(wxFocusEvent& event)
 		s_inActivate = false;
 	}
 	else if (event.GetEventType() == wxEVT_KILL_FOCUS) {
-		const CAuiDocChildFrame* child =
-			static_cast<CAuiDocChildFrame*>(mainFrame->GetActiveChild());
-		wxView* view = child ? child->GetView() : docManager->GetAnyUsableView();
+		const ibAuiDocChildFrame* child =
+			static_cast<ibAuiDocChildFrame*>(mainFrame->GetActiveChild());
+		ibView* view = child ? child->GetView() : docManager->GetAnyUsableView();
 		if (view != nullptr && view != docManager->GetCurrentView()) {
 			s_inActivate = true;
 			view->Activate(true);

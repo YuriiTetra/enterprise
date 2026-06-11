@@ -7,7 +7,6 @@
 #include "backend/metaData.h"
 #include "commonObject.h"
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueManagerDataObjectAccountingRegister, ibValue);
 
 const ibValueMetaObjectCommonModule* ibValueManagerDataObjectAccountingRegister::GetManagerModule() const
 {
@@ -27,20 +26,18 @@ enum Func {
 	eGetTemplate,
 };
 
-void ibValueManagerDataObjectAccountingRegister::PrepareNames() const
+void ibValueManagerDataObjectAccountingRegister::FillManagerMethods(ibMemberTable& helper) const
 {
-	ibValueManagerDataObject::PrepareNames();
-
-	m_methodHelper->AppendFunc(wxT("CreateRecordSet"), wxT("CreateRecordSet()"));
-	m_methodHelper->AppendFunc(wxT("CreateRecordKey"), wxT("CreateRecordKey()"));
-	m_methodHelper->AppendFunc(wxT("Balance"), 3, wxT("Balance(period, account, filter...)"));
-	m_methodHelper->AppendFunc(wxT("Turnovers"), 4, wxT("Turnovers(beginOfPeriod, endOfPeriod, account, filter...)"));
-	m_methodHelper->AppendFunc(wxT("DrCrTurnovers"), 4, wxT("DrCrTurnovers(beginOfPeriod, endOfPeriod, account, filter...)"));
-	m_methodHelper->AppendFunc(wxT("BalanceAndTurnovers"), 4, wxT("BalanceAndTurnovers(beginOfPeriod, endOfPeriod, account, filter...)"));
-	m_methodHelper->AppendFunc(wxT("Select"), wxT("Select()"));
-	m_methodHelper->AppendFunc(wxT("GetForm"), 3, wxT("GetForm(string, owner, guid)"));
-	m_methodHelper->AppendFunc(wxT("GetListForm"), 3, wxT("GetListForm(string, owner, guid)"));
-	m_methodHelper->AppendFunc(wxT("GetTemplate"), 1, wxT("GetTemplate(string)"));
+	helper.AppendFunc(wxT("CreateRecordSet"), wxT("CreateRecordSet()"));
+	helper.AppendFunc(wxT("CreateRecordKey"), wxT("CreateRecordKey()"));
+	helper.AppendFunc(wxT("Balance"), 3, wxT("Balance(period, account, filter...)"));
+	helper.AppendFunc(wxT("Turnovers"), 4, wxT("Turnovers(beginOfPeriod, endOfPeriod, account, filter...)"));
+	helper.AppendFunc(wxT("DrCrTurnovers"), 4, wxT("DrCrTurnovers(beginOfPeriod, endOfPeriod, account, filter...)"));
+	helper.AppendFunc(wxT("BalanceAndTurnovers"), 4, wxT("BalanceAndTurnovers(beginOfPeriod, endOfPeriod, account, filter...)"));
+	helper.AppendFunc(wxT("Select"), wxT("Select()"));
+	helper.AppendFunc(wxT("GetForm"), 3, wxT("GetForm(string, owner, guid)"));
+	helper.AppendFunc(wxT("GetListForm"), 3, wxT("GetListForm(string, owner, guid)"));
+	helper.AppendFunc(wxT("GetTemplate"), 1, wxT("GetTemplate(string)"));
 }
 
 #include "selector/objectSelector.h"
@@ -53,7 +50,7 @@ bool ibValueManagerDataObjectAccountingRegister::CallAsFunc(const long lMethodNu
 		pvarRetValue = m_metaObject->CreateRecordSetObjectValue();
 		return true;
 	case eCreateRecordKey:
-		pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueRecordKeyObject>(m_metaObject);
+		pvarRetValue = new ibValueRecordKeyObject(m_metaObject);
 		return true;
 	case eBalance:
 		pvarRetValue = lSizeArray > 2 ?
@@ -79,7 +76,7 @@ bool ibValueManagerDataObjectAccountingRegister::CallAsFunc(const long lMethodNu
 			BalanceAndTurnovers(*paParams[0], *paParams[1]);
 		return true;
 	case eSelect:
-		pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueSelectorRegisterDataObject>(m_metaObject);
+		pvarRetValue = new ibValueSelectorRegisterDataObject(m_metaObject);
 		return true;
 	case eGetForm:
 	{

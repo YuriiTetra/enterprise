@@ -934,7 +934,7 @@ void ibCodeEditor::LoadCallTip()
 				const ibCtorAbstractType* objectValueAbstract =
 					ibValue::GetAvailableCtor(expression);
 				ibValue* newObject = objectValueAbstract->CreateObject();
-				ibValue::ibValueMethodHelper* methodHelper = newObject->GetPMethods();
+				ibValue::ibMemberTable* methodHelper = newObject->GetPMethods();
 				if (methodHelper != nullptr) {
 					for (long idx = 0; idx < methodHelper->GetNConstructors(); idx++) {
 						sDescription = methodHelper->GetConstructorHelper(idx);
@@ -1055,7 +1055,7 @@ void ibCodeEditor::LoadFromKeyWord(const wxString& keyword)
 		if (m_document) {
 			const ibValueMetaObject* metaObject = m_document->GetMetaObject();
 			if (metaObject) {
-				ibMetaData* metaData = metaObject->GetMetaData();
+				const ibMetaData* metaData = metaObject->GetMetaData();
 				wxASSERT(metaData);
 
 				for (auto class_obj : metaData->GetListCtorsByType(ibCtorObjectMetaType::ibCtorObjectMetaType_Object))
@@ -1076,7 +1076,7 @@ void ibCodeEditor::LoadFromKeyWord(const wxString& keyword)
 	{
 		const ibValueMetaObject* metaObject = m_document->GetMetaObject();
 		wxASSERT(metaObject);
-		ibMetaData* metaData = metaObject->GetMetaData();
+		const ibMetaData* metaData = metaObject->GetMetaData();
 		wxASSERT(metaData);
 
 		for (const auto object : metaData->GetAnyArrayObject(g_metaCommonFormCLSID))

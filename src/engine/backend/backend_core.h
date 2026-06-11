@@ -6,12 +6,14 @@
 #include <map>
 
 #include "backend.h"
+#include "rowValues.h"
 
 extern BACKEND_API unsigned int GetBuildId();
 
 #include "guid.h"
 #include "clsid.h"
-#include "number.h"
+#include "fnumber.h"
+#include "fstring.h"
 #include "typeconv.h"
 #include "stringUtils.h"
 
@@ -37,15 +39,22 @@ typedef int ibActionID;
 typedef unsigned wxLongLong_t ibPictureID;
 typedef unsigned int ibVersionID;
 
-typedef std::map<
-	ibMetaID, class BACKEND_API ibValue
-> ibMetaValueArray;
+// metaID -> ibValue set of one record object / table row.
+// ibRowValues (sorted vector) — same std::map API & sorted order, but one
+// allocation, contiguous lookup and no per-entry RB-node overhead. See rowValues.h.
+// (Alias only — ibValue is forward-declared inline; instantiated at member sites
+// where value.h is complete.)
+typedef ibRowValues<ibMetaID, class BACKEND_API ibValue> ibRowMetaValues;
 
 //*******************************************************************************************
 //*                                 Special enumeration                                     *
 //*******************************************************************************************
 
-enum ibValueTypes {
+// Underlying type fixed at 1 byte: the largest enumerator (TYPE_ITERATOR
+// = 204) fits in unsigned char, and the AOT wire format already narrows
+// m_typeClass to uint8_t (byteCodeAOT.cpp), so this is binary-compatible
+// with persisted bytecode. Shrinks the m_typeClass slot in every ibValue.
+enum ibValueTypes : unsigned char {
 
 	TYPE_EMPTY = 0,
 	TYPE_BOOLEAN = 1,
@@ -54,7 +63,10 @@ enum ibValueTypes {
 	TYPE_STRING = 4,
 	TYPE_NULL = 5,
 
-	TYPE_REFFER = 100, // object reference
+	TYPE_REFFER = 100, // object reference (owned: IncrRef/DecrRef, Reset may delete)
+	TYPE_CONST_REFFER = 101, // read-only reference to a NON-owned object (e.g. a
+	                         // const ibValueMetaObject* from the metadata tree).
+	                         // No ref-count, Reset never deletes it; mutation blocked.
 
 	TYPE_VALUE = 200, // value
 	TYPE_ENUM = 201, // enumeration
@@ -80,8 +92,6 @@ enum ibValueTypes {
 #define _USE_NET_COMPRESSOR 0
 //use dynamic linking 
 #define _USE_DYNAMIC_DATABASE_LAYER_LINKING 1
-//don't use exception in db layer
-#define _USE_DATABASE_LAYER_EXCEPTIONS 0
 
 //max precision 
 #define MAX_PRECISION_NUMBER 32

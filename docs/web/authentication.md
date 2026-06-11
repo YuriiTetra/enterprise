@@ -48,7 +48,7 @@ responsibility. Concrete overrides:
   returns false, so a failed CLI auth on the web path fails hard.
   Real web auth comes from the browser via `POST /login`, so this
   path is essentially never taken in practice.
-- **Headless** (daemon / codeRunner / classChecker): no override —
+- **Headless** (daemon / codeRunner): no override —
   base returns false. CLI credentials must be correct; failure
   exits cleanly.
 
@@ -110,8 +110,11 @@ User identity now lives on `ibSession`, not on a process-wide
 singleton. `ibApplicationData::InstallUser` is the single writer; it
 reads the active session via `ibSession::Current()` and stores:
 
-- `m_userInfo` (`ibApplicationDataUserInfo`) — OES user row from
-  `sys_user` (name, full name, guid, roles, language).
+- `m_userInfo` (`ibUserInfo`, renamed from `ibApplicationDataUserInfo`)
+  — OES user row from `sys_user` (name, full name, guid, roles,
+  language). Owns sys_user CRUD as static factories (`Read` / `Save` /
+  `HasAny` / `ListAll` / `Serialize` / `Deserialize`); `appData` no
+  longer mediates.
 - `m_sessionRawPassword` — plain-text of the submitted password.
   Cleared by `ibSession::ClearSessionRawPassword` and on session
   destruction. Never persisted to disk.

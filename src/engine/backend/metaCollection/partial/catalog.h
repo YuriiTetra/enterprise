@@ -9,7 +9,7 @@
 //********************************************************************************************
 
 class ibValueMetaObjectCatalog : public ibValueMetaObjectRecordDataHierarchyMutableRef {
-	wxDECLARE_DYNAMIC_CLASS(ibValueMetaObjectCatalog);
+	public:
 private:
 	enum
 	{
@@ -102,34 +102,15 @@ public:
 
 protected:
 
-	//predefined array 
-	virtual bool FillArrayObjectByPredefinedAttribute(std::vector<ibValueMetaObjectAttributeBase*>& array) const {
-
+	// Additive contract — chains to HierarchyMutableRef which chains
+	// to MutableRef which chains to Ref. Catalog appends Owner only
+	// when the owner-attribute has type definitions (otherwise the
+	// attribute is unused on this catalog).
+	virtual bool FillArrayObjectByPredefinedAttribute(std::vector<ibValueMetaObjectAttributeBase*>& array) const override {
+		ibValueMetaObjectRecordDataHierarchyMutableRef::FillArrayObjectByPredefinedAttribute(array);
 		const ibValueMetaObjectAttributePredefined* metaObjectAttributeOwner = GetCatalogOwner();
-		if (metaObjectAttributeOwner != nullptr && metaObjectAttributeOwner->GetClsidCount() > 0) {
-			array = {
-				m_propertyAttributePredefined->GetMetaObject(),
-				m_propertyAttributeCode->GetMetaObject(),
-				m_propertyAttributeDescription->GetMetaObject(),
-				m_propertyAttributeOwner->GetMetaObject(),
-				m_propertyAttributeParent->GetMetaObject(),
-				m_propertyAttributeIsFolder->GetMetaObject(),
-				m_propertyAttributeReference->GetMetaObject(),
-				m_propertyAttributeDeletionMark->GetMetaObject(),
-			};
-		}
-		else {
-			array = {
-				m_propertyAttributePredefined->GetMetaObject(),
-				m_propertyAttributeCode->GetMetaObject(),
-				m_propertyAttributeDescription->GetMetaObject(),
-				m_propertyAttributeParent->GetMetaObject(),
-				m_propertyAttributeIsFolder->GetMetaObject(),
-				m_propertyAttributeReference->GetMetaObject(),
-				m_propertyAttributeDeletionMark->GetMetaObject(),
-			};
-		};
-
+		if (metaObjectAttributeOwner != nullptr && metaObjectAttributeOwner->GetClsidCount() > 0)
+			array.push_back(m_propertyAttributeOwner->GetMetaObject());
 		return true;
 	}
 
@@ -259,6 +240,7 @@ private:
 //********************************************************************************************
 
 class ibValueRecordDataObjectCatalog : public ibValueRecordDataObjectHierarchyRef {
+	public:
 	ibValueRecordDataObjectCatalog(const ibValueMetaObjectCatalog* metaObject, const ibGuid& objGuid = wxNullGuid, ibObjectMode objMode = ibObjectMode::OBJECT_ITEM);
 	ibValueRecordDataObjectCatalog(const ibValueRecordDataObjectCatalog& source);
 public:
@@ -267,25 +249,18 @@ public:
 	//*                              Support id's                                *
 	//****************************************************************************
 
-	//save modify 
-	virtual bool SaveModify() { return WriteObject(); }
-
-	//default methods
-	virtual bool FillObject(ibValue& vFillObject) const { return Filling(vFillObject); }
-	virtual ibValueRecordDataObjectRef* CopyObject(bool showValue = false) {
-		ibValueRecordDataObjectRef* objectRef = CopyObjectValue();
-		if (objectRef != nullptr && showValue)
-			objectRef->ShowFormValue();
-		return objectRef;
-	}
-	virtual bool WriteObject();
-	virtual bool DeleteObject();
+	// SaveModify / FillObject / CopyObject / WriteObject / DeleteObject
+	// all inherited from ibValueRecordDataObjectHierarchyRef and (for
+	// the convenience pair) ibValueRecordDataObjectRef. See those bases
+	// for the canonical layouts.
 
 	//****************************************************************************
 	//*                              Support methods                             *
 	//****************************************************************************
 
-	virtual void PrepareNames() const;
+	// Catalog's own methods (the data members come from the base FillDataMembers).
+	// Bound in the ctor; run lazily by Build().
+	void FillMethods(ibMemberTable& helper) const;
 
 	//****************************************************************************
 	//*                              Override attribute                          *
@@ -299,11 +274,16 @@ public:
 	//support source data 
 	virtual ibSourceExplorer GetSourceExplorer() const;
 
-#pragma region _form_builder_h_
-	//support show 
-	virtual void ShowFormValue(const wxString& strFormName = wxEmptyString, ibBackendControlFrame* owner = nullptr);
-	virtual ibBackendValueForm* GetFormValue(const wxString& strFormName = wxEmptyString, ibBackendControlFrame* owner = nullptr);
-#pragma endregion
+	// ShowFormValue / GetFormValue inherited from HierarchyRef.
+	// GetCurrentObjectFormID below picks Catalog's eFormObject /
+	// eFormFolder based on m_objMode.
+protected:
+	virtual ibFormID GetCurrentObjectFormID() const override {
+		return m_objMode == ibObjectMode::OBJECT_ITEM
+			? ibValueMetaObjectCatalog::eFormObject
+			: ibValueMetaObjectCatalog::eFormFolder;
+	}
+public:
 
 	//support actionData
 	virtual ibActionCollection GetActionCollection(const ibFormID& formType);

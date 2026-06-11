@@ -15,7 +15,7 @@ static std::set<ibFormVisualDocument*> s_createdDocFormArray = {};
 ibFormVisualEditView* ibFormVisualDocument::GetFirstView() const
 {
 	return wxDynamicCast(
-		ibMetaDocument::GetFirstView(), ibFormVisualEditView
+		ibDocument::GetFirstView(), ibFormVisualEditView
 	);
 }
 
@@ -55,9 +55,7 @@ bool ibFormVisualDocument::OnCreate(const wxString& path, long flags)
 
 	ibFormVisualDocument::SetTitle(m_valueForm->GetCaption());
 
-	if (IsVisualDemonstrationDoc()) m_childDoc = false;
-
-	return ibMetaDocument::OnCreate(path, flags);
+	return ibDocument::OnCreate(path, flags);
 }
 
 bool ibFormVisualDocument::OnCloseDocument()
@@ -65,16 +63,17 @@ bool ibFormVisualDocument::OnCloseDocument()
 	if (m_valueForm != nullptr)
 		m_valueForm->m_formModified = false;
 
-	wxDocManager* documentManager = GetDocumentManager();
+	ibDocManager* documentManager = GetDocumentManager();
 
 	// When the parent document closes, its children must be closed as well as
-	// they can't exist without the parent.
-	ibMetaDocument const* documentParent = m_documentParent;
+	// they can't exist without the parent. m_documentParent is ibDocument*;
+	// GetFirstView lives on ibDocument, so no downcast is needed.
+	ibDocument const* documentParent = m_documentParent;
 
 	if (documentManager != nullptr && documentParent != nullptr)
 		documentManager->ActivateView(documentParent->GetFirstView());
 
-	return ibMetaDocument::OnCloseDocument();
+	return ibDocument::OnCloseDocument();
 }
 
 bool ibFormVisualDocument::IsCloseOnOwnerClose() const
@@ -116,6 +115,13 @@ bool ibFormVisualDocument::Save()
 		ibValueSystemFunction::Alert(err.GetErrorDescription());
 		success = false;
 	}
+	catch (const ibBackendLockException& err) {
+		// Version-conflict / row-lock-timeout — show the actual reason
+		// ("changed by another user, please reload") instead of the
+		// generic "An error occurred". Same pattern as access-denied.
+		ibValueSystemFunction::Alert(err.GetErrorDescription());
+		success = false;
+	}
 	catch (const ibBackendException&) {
 		ibValueSystemFunction::Alert(_("An error occurred while trying to save the form!"));
 		success = false;
@@ -129,9 +135,12 @@ bool ibFormVisualDocument::Save()
 	return true;
 }
 
-void ibFormVisualDocument::SetDocParent(ibMetaDocument* docParent)
+void ibFormVisualDocument::SetDocParent(ibDocument* docParent)
 {
-	ibMetaDocument::SetDocParent(docParent);
+	// Base's SetDocParent now lives on ibDocument (step-4 collapse); the
+	// adapter no longer overrides it. Forward to base, then run the
+	// form-side cleanup if we're detaching.
+	ibDocument::SetDocParent(docParent);
 
 	if (docParent == nullptr &&
 		(m_valueForm != nullptr && m_valueForm->m_controlOwner != nullptr)) {
@@ -141,7 +150,7 @@ void ibFormVisualDocument::SetDocParent(ibMetaDocument* docParent)
 	}
 }
 
-ibMetaView* ibFormVisualDocument::DoCreateView()
+ibView* ibFormVisualDocument::DoCreateView()
 {
 	return new ibFormVisualEditView();
 }
@@ -154,7 +163,6 @@ ibFormVisualDocument::ibFormVisualDocument(ibValueForm* valueForm)
 	if (m_valueForm != nullptr) {
 
 		ibFormVisualDocument::SetCommandProcessor(new ibFormVisualCommandProcessor);
-		ibFormVisualDocument::SetMetaObject(nullptr);
 	}
 
 	s_createdDocFormArray.insert(this);
@@ -171,7 +179,7 @@ ibFormVisualDocument::~ibFormVisualDocument()
 
 /////////////////////////////////////////////////////////////////////////////////////////////
 
-ibMetaData* ibFormVisualDocument::GetMetaData() const
+const ibMetaData* ibFormVisualDocument::GetMetaData() const
 {
 	return m_valueForm != nullptr ?
 		m_valueForm->GetMetaData() : nullptr;
@@ -346,7 +354,7 @@ wxPrintout* ibFormVisualEditView::OnCreatePrintout()
 #endif
 }
 
-bool ibFormVisualEditView::OnCreate(ibMetaDocument* doc, long flags)
+bool ibFormVisualEditView::OnCreate(ibDocument* doc, long flags)
 {
 	std::set<ibFormVisualDocument*>::iterator foundedVisualDoc =
 
@@ -364,10 +372,10 @@ bool ibFormVisualEditView::OnCreate(ibMetaDocument* doc, long flags)
 		return m_visualHost->CreateAndUpdateVisualHost();
 	}
 
-	return ibMetaView::OnCreate(doc, flags);
+	return ibView::OnCreate(doc, flags);
 }
 
-void ibFormVisualEditView::OnUpdate(wxView* sender, wxObject* hint)
+void ibFormVisualEditView::OnUpdate(ibView* sender, wxObject* hint)
 {
 	if (m_visualHost != nullptr)
 		m_visualHost->UpdateForm();
@@ -377,7 +385,7 @@ bool ibFormVisualEditView::OnClose(bool deleteWindow)
 {
 	if (!deleteWindow) {
 
-		ibMetaDocument const* doc = GetDocument();
+		ibDocument const* doc = GetDocument();
 		wxASSERT(doc);
 
 		std::set<ibFormVisualDocument*>::iterator foundedVisualDoc =
@@ -401,7 +409,7 @@ bool ibFormVisualEditView::OnClose(bool deleteWindow)
 	//	Activate(false);
 
 #ifndef OES_USE_WEB
-	// GetFrame() returns a wxWindow (the wxDocChildFrame hosting this
+	// GetFrame() returns a wxWindow (the ibDocChildFrame hosting this
 	// view on desktop). On web the view's "frame" is an ibWebDocChildFrame
 	// living in ibWebFrame's tab vector — its lifetime is managed by
 	// the session's tab close path, not by the view. So no Destroy here.
@@ -415,7 +423,7 @@ bool ibFormVisualEditView::OnClose(bool deleteWindow)
 	}
 #endif
 
-	return ibMetaView::OnClose(deleteWindow);
+	return ibView::OnClose(deleteWindow);
 }
 
 void ibFormVisualEditView::OnClosingDocument()

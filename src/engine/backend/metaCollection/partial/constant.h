@@ -1,14 +1,41 @@
-﻿#ifndef __CONSTANTS_H__
+#ifndef __CONSTANTS_H__
 #define __CONSTANTS_H__
 
 #include "backend/metaCollection/partial/commonObject.h"
 
 class BACKEND_API ibValueRecordDataObjectConstant;
 
-class BACKEND_API ibValueMetaObjectConstant : 
-	public ibValueMetaObjectAttribute, public ibBackendCommandItem {
-	
-	wxDECLARE_DYNAMIC_CLASS(ibValueMetaObjectConstant);
+// ibConstantQueryable — the L3 queryable for a constant (its single-row sys_const
+// table). The constant no longer IS a queryable; it VENDS this adapter (a stable
+// member), which forwards to the constant's own query methods. The constant is still
+// a COLUMN (via ibValueMetaObjectAttribute); only the table face moved out.
+class ibValueMetaObjectConstant;
+class BACKEND_API ibConstantQueryable : public ibBackendQueryable {
+public:
+	explicit ibConstantQueryable(const ibValueMetaObjectConstant* meta) : m_meta(meta) {}
+	virtual const ibBackendQueryColumn* ResolveColumnByName(const wxString& name) const override;   // the constant IS its one column
+	virtual wxString GetQueryTableName() const override;
+	virtual ibMetaID GetQueryMetaID() const override;
+	virtual const ibMetaData* GetMetaData() const override;                      // metadata context for column-based value reads
+	virtual std::vector<ibQuerySortItem> GetIdentitySort() const override;
+	virtual std::vector<const ibBackendQueryColumn*> GetPrimaryKeyColumns() const override;   // { RECORD_KEY } — the single-row UPSERT match
+private:
+	const ibValueMetaObjectConstant* m_meta;
+};
+
+class BACKEND_API ibValueMetaObjectConstant :
+	public ibValueMetaObjectAttribute, public ibBackendCommandItem, public ibBackendQueryableHolder {
+	public:
+
+	// A constant is BOTH a column (via ibValueMetaObjectAttribute -> the value lives as
+	// one column of the shared single-row sys_const) AND, through its vended queryable,
+	// that one-row table. The constant VENDS the queryable; ibConstantQueryable (a
+	// friend) owns the table navigation, from the constant's primitives (GetName /
+	// GetMetaID / GetTableNameDB). So From(constant->GetQueryable()) reads the one row.
+	virtual const ibBackendQueryable* GetQueryable() const override { return m_queryable.GetQueryable(); }
+	friend class ibConstantQueryable;
+
+
 protected:
 	enum
 	{
@@ -63,9 +90,9 @@ public:
 	//process default query
 	int ProcessAttribute(const wxString& tableName, ibValueMetaObjectAttributeBase* srcAttr, ibValueMetaObjectAttributeBase* dstAttr);
 
-	// load & save config data 
-	virtual bool LoadTableData(const ibReaderMemory& reader);
-	virtual bool SaveTableData(ibWriterMemory& writer) const;
+	// dump & restore table data
+	virtual bool RestoreTable(const ibReaderMemory& reader);
+	virtual bool DumpTable(ibWriterMemory& writer) const;
 
 protected:
 
@@ -95,6 +122,10 @@ private:
 
 	ibPropertyInnerModule<ibValueMetaObjectModule>* m_propertyModule = ibPropertyObject::CreateProperty<ibPropertyInnerModule<ibValueMetaObjectModule>>(m_categoryContext, wxT("RecordModule"), _("Record module"));
 
+	// the L4 source descriptor — CONTAINS the vended queryable (stable for this constant's
+	// life) and is registered with the factory on run / close; GetQueryable() forwards to it.
+	ibMetaSourceDescriptor<ibConstantQueryable, ibValueMetaObjectConstant> m_queryable{ this };
+
 #pragma region role 
 	ibRole* m_roleRead = ibValueMetaObject::CreateRole(wxT("Read"), _("Read"));
 	ibRole* m_roleWrite = ibValueMetaObject::CreateRole(wxT("Write"), _("Write"));
@@ -106,29 +137,26 @@ private:
 
 #include "backend/moduleInfo.h"
 
-class BACKEND_API ibValueRecordDataObjectConstant : public ibValue, public ibActionDataObject,
+class BACKEND_API ibValueRecordDataObjectConstant : public ibValueDynamicMembers, public ibActionDataObject,
 	public ibSourceDataObject, public ibRuntimeModuleDataObject {
+	public:
 	virtual bool InitializeObject(const ibValueRecordDataObjectConstant* source = nullptr);
 protected:
 	enum helperAlias {
 		eSystem,
-		eProcUnit
+		eProcUnit = g_aliasExport   // module exports go through the descriptor autobind
 	};
 	enum helperProp {
 		eValue
 	};
-protected:
+public:
 
 	//override copy constructor
 	ibValueRecordDataObjectConstant(const ibValueMetaObjectConstant* metaObject);
 	ibValueRecordDataObjectConstant(const ibValueRecordDataObjectConstant& source);
 
-	//standart override 
-	virtual ibValueMethodHelper* GetPMethods() const final { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return m_methodHelper;
-	}
-
+	// Helper + NVI DoGetPMethods come from ibValueDynamicMembers; the surface is
+	// supplied by FillMembers, bound in the ctor.
 public:
 
 	virtual ~ibValueRecordDataObjectConstant();
@@ -142,8 +170,8 @@ public:
 	ibValue GetConstValue() const;
 	bool SetConstValue(const ibValue& cValue);
 
-	//standart override 
-	virtual void PrepareNames() const;
+	// Name surface = only the constant module's exported names, surfaced by the
+	// descriptor autobind (ExportThunk bound in the ctor). No own filler needed.
 
 	virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal);
 	virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal);
@@ -191,9 +219,14 @@ public:
 		return (const ibValueMetaObjectGenericData*)m_metaObject;
 	};
 
-	//get unique identifier 
+	//get unique identifier
 	virtual ibUniqueKey GetGuid() const { return m_metaObject->GetGuid(); }
 	virtual bool SaveModify() override { return SetConstValue(m_constValue); }
+
+	// Constants are single-row "global" - lock keyed by namespace path
+	// only, no per-key sub-identifier. Soft-lock UX same as ref-objects:
+	// form opens silent on conflict, Write re-throws if persistent.
+	bool TryAcquireFormLock(ibLockMode mode = ibLockMode::Exclusive) override;
 
 	//get frame
 	virtual ibBackendValueForm* GetForm() const;
@@ -220,7 +253,6 @@ protected:
 
 	bool m_objModified;
 
-	ibValueMethodHelper* m_methodHelper;
 	const ibValueMetaObjectConstant* m_metaObject;
 	ibValue m_constValue;
 

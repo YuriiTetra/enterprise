@@ -6,7 +6,6 @@
 #include "metaTableObject.h"
 #include "backend/metaData.h"
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectTableData, ibValueMetaObjectCompositeData)
 
 //***********************************************************************
 //*                         Attributes                                  * 
@@ -14,6 +13,35 @@ wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectTableData, ibValueMetaObjectComposite
 
 #include "backend/objCtor.h"
 #include "backend/metaCollection/partial/commonObject.h"
+#include "backend/query/queryableHooks.h"   // light L4 source registration hooks
+
+//***********************************************************************
+//*                  ibTabularSourceDescriptor                          *
+//***********************************************************************
+
+ibTabularSourceDescriptor::ibTabularSourceDescriptor(ibValueMetaObjectTableData* meta)
+	: m_meta(meta), m_queryable(meta)
+{
+}
+
+wxString ibTabularSourceDescriptor::GetNamespace() const
+{
+	// parent-qualified: the tabular section's namespace is its parent record/document's kind.
+	ibValueMetaObject* parent = m_meta->GetParent();
+	return parent != nullptr ? ibValue::GetNameObjectFromID(parent->GetClassType()) : wxString();
+}
+
+wxString ibTabularSourceDescriptor::GetName() const
+{
+	// "<Parent>.<Section>" — reached as the 3-segment source Document.Expense.Goods.
+	ibValueMetaObject* parent = m_meta->GetParent();
+	return parent != nullptr ? (parent->GetName() + wxT(".") + m_meta->GetName()) : m_meta->GetName();
+}
+
+const ibBackendQueryable* ibTabularSourceDescriptor::CreateQueryable(ibValue** /*paParams*/, long /*lSizeArray*/)
+{
+	return &m_queryable;
+}
 
 ibTypeDescription ibValueMetaObjectTableData::GetTypeDesc() const
 {
@@ -101,7 +129,7 @@ bool ibValueMetaObjectTableData::OnBeforeRunMetaObject(int flags)
 {
 	if (!(*m_propertyNumberLine)->OnBeforeRunMetaObject(flags))
 		return false;
-	ibValueMetaObjectRecordData* metaObject = wxDynamicCast(GetParent(), ibValueMetaObjectRecordData);
+	ibValueMetaObjectRecordData* metaObject = dynamic_cast<ibValueMetaObjectRecordData*>(GetParent());
 	wxASSERT(metaObject);
 	if (metaObject != nullptr) {
 		registerTabularSection();
@@ -113,16 +141,25 @@ bool ibValueMetaObjectTableData::OnBeforeRunMetaObject(int flags)
 
 bool ibValueMetaObjectTableData::OnAfterRunMetaObject(int flags)
 {
-	if ((flags & newObjectFlag) != 0 || (flags & pasteObjectFlag) != 0) 
+	if ((flags & newObjectFlag) != 0 || (flags & pasteObjectFlag) != 0)
 		OnReloadMetaObject();
+	// Register the tabular section as an L4 query source (parent-qualified "<Parent>.<Section>").
+	if (!(flags & onlyLoadFlag))
+		ibRegisterQueryableSource(&m_queryable);
 	return ibValueMetaObject::OnAfterRunMetaObject(flags);
+}
+
+bool ibValueMetaObjectTableData::OnBeforeCloseMetaObject()
+{
+	ibUnregisterQueryableSource(&m_queryable);
+	return ibValueMetaObject::OnBeforeCloseMetaObject();
 }
 
 bool ibValueMetaObjectTableData::OnAfterCloseMetaObject()
 {
 	if (!(*m_propertyNumberLine)->OnAfterCloseMetaObject())
 		return false;
-	ibValueMetaObjectRecordData* metaObject = wxDynamicCast(GetParent(), ibValueMetaObjectRecordData);
+	ibValueMetaObjectRecordData* metaObject = dynamic_cast<ibValueMetaObjectRecordData*>(GetParent());
 	wxASSERT(metaObject);
 	if (metaObject != nullptr) {
 		unregisterTabularSection();

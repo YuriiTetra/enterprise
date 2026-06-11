@@ -33,8 +33,7 @@
 // we returned via Break from a previous outer-loop iteration; the
 // cursor is stale and must be reset.
 class ibValueIterator : public ibValue {
-	wxDECLARE_DYNAMIC_CLASS(ibValueIterator);
-public:
+	public:
 	ibValueIterator()
 		: ibValue(ibValueTypes::TYPE_ITERATOR),
 		  m_hotFromNextIter(false) {}
@@ -84,8 +83,7 @@ extern BACKEND_API const ibClassID g_valueIterator;
 // ibByteFunction inside m_listFunc is owned by parentBc. The value
 // must not outlive the session that produced it.
 class ibValueFunction : public ibValue {
-	wxDECLARE_DYNAMIC_CLASS(ibValueFunction);
-public:
+	public:
 	ibValueFunction() : ibValue(ibValueTypes::TYPE_FUNCTION) {}
 
 	ibValueFunction(const ibByteCode* parentBc, long funcIndex)
@@ -218,7 +216,7 @@ extern BACKEND_API const ibClassID g_valueFunction;
 // AsIterator returns nullptr.
 inline ibValueFunction* AsFunction(const ibValue* v) {
 	if (v == nullptr) return nullptr;
-	const ibValue* target = (v->m_typeClass == ibValueTypes::TYPE_REFFER) ? v->m_pRef : v;
+	const ibValue* target = (v->IsReference()) ? v->m_pConstRef : v;
 	return (target != nullptr && target->m_typeClass == ibValueTypes::TYPE_FUNCTION)
 		? static_cast<ibValueFunction*>(const_cast<ibValue*>(target)) : nullptr;
 }
@@ -226,7 +224,7 @@ inline ibValueFunction* AsFunction(const ibValue& v) { return AsFunction(&v); }
 
 inline ibValueIterator* AsIterator(const ibValue* v) {
 	if (v == nullptr) return nullptr;
-	const ibValue* target = (v->m_typeClass == ibValueTypes::TYPE_REFFER) ? v->m_pRef : v;
+	const ibValue* target = (v->IsReference()) ? v->m_pConstRef : v;
 	return (target != nullptr && target->m_typeClass == ibValueTypes::TYPE_ITERATOR)
 		? static_cast<ibValueIterator*>(const_cast<ibValue*>(target)) : nullptr;
 }
@@ -250,14 +248,8 @@ inline void CopyValue(ibValue& cValue1, ibValue& cValue2)
 		cValue1.SetValue(cValue2);
 		return;
 	}
-	else {//Reset
-		if (cValue1.m_pRef && cValue1.m_typeClass == ibValueTypes::TYPE_REFFER)
-			cValue1.m_pRef->DecrRef();
-
-		cValue1.m_typeClass = ibValueTypes::TYPE_EMPTY;
-		cValue1.m_sData = wxEmptyString;
-
-		cValue1.m_pRef = nullptr;
+	else {
+		cValue1.Reset();   // DecrRef ref / delete string buffer / → TYPE_EMPTY
 	}
 
 	if (cValue2.m_typeClass == ibValueTypes::TYPE_REFFER) {
@@ -278,13 +270,18 @@ inline void CopyValue(ibValue& cValue1, ibValue& cValue2)
 		cValue1.m_fData = cValue2.m_fData;
 		break;
 	case ibValueTypes::TYPE_STRING:
-		cValue1.m_sData = cValue2.m_sData;
+		cValue1.SetString(cValue2.GetString());
 		break;
 	case ibValueTypes::TYPE_DATE:
 		cValue1.m_dData = cValue2.m_dData;
 		break;
 	case ibValueTypes::TYPE_REFFER:
 		cValue1.m_pRef = cValue2.m_pRef; cValue1.m_pRef->IncrRef();
+		break;
+	case ibValueTypes::TYPE_CONST_REFFER:
+		// weak non-owning const ref — share the pointer, NO IncrRef (the metadata
+		// tree owns it). Object-write protection is by type, not m_bReadOnly.
+		cValue1.m_pConstRef = cValue2.m_pConstRef;
 		break;
 	case ibValueTypes::TYPE_OLE:
 	case ibValueTypes::TYPE_ENUM:
@@ -328,13 +325,18 @@ inline void CopyValue(ibValue& cValue1, const ibValue& cValue2)
 		cValue1.m_fData = cValue2.m_fData;
 		break;
 	case ibValueTypes::TYPE_STRING:
-		cValue1.m_sData = cValue2.m_sData;
+		cValue1.SetString(cValue2.GetString());
 		break;
 	case ibValueTypes::TYPE_DATE:
 		cValue1.m_dData = cValue2.m_dData;
 		break;
 	case ibValueTypes::TYPE_REFFER:
 		cValue1.m_pRef = cValue2.m_pRef; cValue1.m_pRef->IncrRef();
+		break;
+	case ibValueTypes::TYPE_CONST_REFFER:
+		// weak non-owning const ref — share the pointer, NO IncrRef. Object-write
+		// protection is by type, not m_bReadOnly.
+		cValue1.m_pConstRef = cValue2.m_pConstRef;
 		break;
 	case ibValueTypes::TYPE_OLE:
 	case ibValueTypes::TYPE_ENUM:
@@ -366,7 +368,7 @@ inline void MoveValue(ibValue&& cValue1, ibValue&& cValue2)
 		cValue1.m_fData = std::move(cValue2.m_fData);
 		break;
 	case ibValueTypes::TYPE_STRING:
-		cValue1.m_sData = std::move(cValue2.m_sData);
+		cValue1.SetString(cValue2.GetString());
 		break;
 	case ibValueTypes::TYPE_DATE:
 		cValue1.m_dData = std::move(cValue2.m_dData);
@@ -374,6 +376,11 @@ inline void MoveValue(ibValue&& cValue1, ibValue&& cValue2)
 	case ibValueTypes::TYPE_REFFER:
 		cValue1.m_pRef = cValue2.m_pRef;
 		cValue1.m_pRef->IncrRef();
+		break;
+	case ibValueTypes::TYPE_CONST_REFFER:
+		// weak non-owning const ref — share the pointer, NO IncrRef. Object-write
+		// protection is by type, not m_bReadOnly.
+		cValue1.m_pConstRef = cValue2.m_pConstRef;
 		break;
 	case ibValueTypes::TYPE_OLE:
 	case ibValueTypes::TYPE_ENUM:

@@ -7,13 +7,11 @@
 #include "backend/metaData.h"
 #include "commonObject.h"
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueManagerDataObjectReport, ibValue);
 
 const ibValueMetaObjectCommonModule* ibValueManagerDataObjectReport::GetManagerModule() const { return m_metaObject->GetManagerModule(); }
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueManagerDataObjectExternalReport, ibValue);
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 
@@ -23,18 +21,16 @@ enum Func {
 	eGetTemplate,
 };
 
-void ibValueManagerDataObjectReport::PrepareNames() const
+void ibValueManagerDataObjectReport::FillManagerMethods(ibMemberTable& helper) const
 {
-	ibValueManagerDataObject::PrepareNames();
-
-	m_methodHelper->AppendFunc(wxT("Create"), wxT("Create()"));
-	m_methodHelper->AppendFunc(wxT("GetForm"), wxT("GetForm(name : string, owner : any, id : guid)"));
-	m_methodHelper->AppendFunc(wxT("GetTemplate"), 1, wxT("GetTemplate(name : string)"));
+	helper.AppendFunc(wxT("Create"), wxT("Create()"));
+	helper.AppendFunc(wxT("GetForm"), wxT("GetForm(name : string, owner : any, id : guid)"));
+	helper.AppendFunc(wxT("GetTemplate"), 1, wxT("GetTemplate(name : string)"));
 }
 
 bool ibValueManagerDataObjectReport::CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray)
 {
-	ibMetaData* metaData = m_metaObject->GetMetaData();
+	const ibMetaData* metaData = m_metaObject->GetMetaData();
 	wxASSERT(metaData);
 
 	switch (lMethodNum)
@@ -57,12 +53,9 @@ bool ibValueManagerDataObjectReport::CallAsFunc(const long lMethodNum, ibValue& 
 	return ibValueManagerDataObject::CallAsFunc(lMethodNum, pvarRetValue, paParams, lSizeArray);
 }
 
-ibValue::ibValueMethodHelper ibValueManagerDataObjectExternalReport::m_methodHelper;
-
-void ibValueManagerDataObjectExternalReport::PrepareNames() const
+void ibValueManagerDataObjectExternalReport::FillManagerMethods(ibMemberTable& helper) const
 {
-	m_methodHelper.ClearHelper();
-	m_methodHelper.AppendFunc(wxT("Create"), 1, wxT("Create(fullPath : string)"));
+	helper.AppendFunc(wxT("Create"), 1, wxT("Create(fullPath : string)"));
 }
 
 #include "backend/system/systemManager.h"
@@ -77,7 +70,7 @@ bool ibValueManagerDataObjectExternalReport::CallAsFunc(const long lMethodNum, i
 	{
 		ibMetaDataReport* metaReport = new ibMetaDataReport();
 		if (metaReport->LoadFromFile(paParams[0]->GetString())) {
-			ibValueModuleManagerExternalReport* moduleManager = metaReport->GetManagerModule();
+			ibValueModuleRuntimeManagerExternalReport* moduleManager = metaReport->GetManagerModule();
 			pvarRetValue = moduleManager->GetObjectValue();
 			return true;
 		}

@@ -14,216 +14,219 @@
 #include "backend/appData.h"
 #include "backend/session/session.h"
 #include "backend/databaseLayer/connectionPool.h"
+#include "backend/databaseLayer/connectionScope.h"
 #include "backend/databaseLayer/databaseErrorCodes.h"
 
 #include "backend/metaCollection/attribute/metaAttributeObject.h"
+#include "backend/query/dataQueryBuilder.h"   // L3 write/read door (From/SetValue/Where/Upsert/Delete) + ibRawDBColumn
 
 #include "backend/system/systemManager.h"
+#include "backend/backend_exception.h"
+
+bool ibValueRecordSetObject::LockByKeys()
+{
+	if (m_metaObject == nullptr || m_keyValues.empty())
+		return true;
+
+	// Lock the existing lines of this composite key for the open write TX. Mirrors ExistData()
+	// — only the BOUND dimensions constrain (FindKeyValue filter; GetGenericDimensionArrayObject
+	// = {recorder} for AR/AcR, {period, dim...} for non-recorder IR), each decomposed inside L3.
+	// The pessimistic row lock rides as page.m_lockForUpdate: the dialect appends its row-lock
+	// clause (FB "WITH LOCK", PG/MySQL "FOR UPDATE"; SQLite no-op — whole-DB TX lock). Draining
+	// the selection holds the lock. No statement, no SetValueAttribute. (docs/record-locks.md)
+	try {
+		ibDataQueryBuilder q;
+		q.From(m_metaObject->GetQueryable());
+		bool anyKey = false;
+		for (const auto object : m_metaObject->GetGenericDimensionArrayObject()) {
+			if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
+				continue;
+			q.Where(object, m_keyValues.at(object->GetMetaID()));
+			anyKey = true;
+		}
+		// No key fields populated — nothing to scope the lock to; the UPSERT path catches any
+		// unique-key conflict via the DB constraint instead.
+		if (!anyKey)
+			return true;
+
+		ibReadPageRequest page;
+		page.m_count = 0;              // every matching line
+		page.m_lockForUpdate = true;   // pessimistic row lock (FOR UPDATE / WITH LOCK)
+		ibDataQueryResult selection = q.Execute(page);
+		while (selection.Next()) {}
+	}
+	catch (...) {
+		ibBackendCoreException::Error(_("Failed to acquire register lock"));
+	}
+	return true;
+}
+
+//----------------------------------------------------------------------
+// Phase A scaffold helpers — register-side counterpart of
+// ibValueRecordDataObjectRef's Begin*/Commit*. Lives next to the
+// LockByKeys query method it calls into. See commonObject.h docs.
+//----------------------------------------------------------------------
+
+bool ibValueRecordSetObject::BeginRecordSetWriteScope(ibConnectionScope& scope)
+{
+	if (appData->DesignerMode())          return false;
+	if (!scope || !scope->IsOpen())
+		ibBackendCoreException::Error(_("Database is not open!"));
+	if (ibBackendException::IsEvalMode()) return false;
+
+	if (!m_metaObject->AccessRight_Write()) {
+		ibBackendAccessException::Error();
+		return false;
+	}
+
+	scope.SafeBeginTransaction();
+	LockByKeys();
+	return true;
+}
+
+bool ibValueRecordSetObject::BeginRecordSetDeleteScope(ibConnectionScope& scope)
+{
+	if (appData->DesignerMode())          return false;
+	if (!scope || !scope->IsOpen())
+		ibBackendCoreException::Error(_("Database is not open!"));
+	if (ibBackendException::IsEvalMode()) return false;
+
+	if (!m_metaObject->AccessRight_Delete()) {
+		ibBackendAccessException::Error();
+		return false;
+	}
+
+	scope.SafeBeginTransaction();
+	LockByKeys();
+	return true;
+}
+
+void ibValueRecordSetObject::CommitRecordSetScope(ibConnectionScope& scope)
+{
+	scope.SafeCommitTransaction();
+	m_objModified = false;
+}
 
 bool ibValueRecordSetObject::ExistData()
 {
-	const auto db = ses_query;
-	const bool isFB = (db->GetDatabaseLayerType() == DATABASELAYER_FIREBIRD);
-
-	const wxString tableName = m_metaObject->GetTableNameDB(); int position = 1;
-	wxString queryText = isFB ? "SELECT FIRST 1 1 FROM " + tableName
-	                          : "SELECT 1 FROM " + tableName;
-	bool firstWhere = true;
-
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-		if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
-			continue;
-		queryText += (firstWhere ? " WHERE " : " AND ")
-		           + ibValueMetaObjectAttributeBase::GetCompositeSQLFieldName(object);
-		firstWhere = false;
+	// Composite-key existence probe through the L3 door: only the BOUND dimensions
+	// constrain (FindKeyValue filter), each decomposed inside L3 across its physical
+	// fields. The FB FIRST / others LIMIT fork and the statement are gone.
+	try {
+		ibDataQueryBuilder q;
+		q.From(m_metaObject->GetQueryable());
+		for (const auto object : m_metaObject->GetGenericDimensionArrayObject()) {
+			if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
+				continue;
+			q.Where(object, ibComparisonType::ibComparisonType_Equal,
+				m_keyValues.at(object->GetMetaID()));
+		}
+		ibReadPageRequest page;
+		page.m_count = 1;
+		ibDataQueryResult selection = q.Execute(page);
+		return selection.Next();
 	}
-	if (!isFB)
-		queryText += " LIMIT 1";
-	queryText += ";";
-
-	ibStatementGuard statement(db, db->PrepareStatement(queryText));
-	if (!statement)
-		return false;
-
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-		if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
-			continue;
-		ibValueMetaObjectAttributeBase::SetValueAttribute(
-			object,
-			m_keyValues.at(object->GetMetaID()),
-			statement.get(),
-			position
-		);
-	}
-
-	ibDatabaseResultSet* resultSet = statement->RunQueryWithResults();
-	if (resultSet == nullptr)
-		return false;
-	bool founded = resultSet->Next();
-	db->CloseResultSet(resultSet);
-	return founded;
+	catch (...) {}
+	return false;
 }
 
 bool ibValueRecordSetObject::ExistData(ibNumber& lastNum)
 {
-	const auto db = ses_query;
-
-	const wxString tableName = m_metaObject->GetTableNameDB(); int position = 1;
-	// MAX aggregation in SQL — DB uses any index on (recorder, line_number)
-	// instead of streaming the whole rowset client-side.
-	const wxString lineNumField = m_metaObject->GetRegisterLineNumber()->GetFieldNameDB() + wxT("_N");
-	wxString queryText = "SELECT MAX(" + lineNumField + ") FROM " + tableName;
-	bool firstWhere = true;
-
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-		if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
-			continue;
-		queryText += (firstWhere ? " WHERE " : " AND ")
-		           + ibValueMetaObjectAttributeBase::GetCompositeSQLFieldName(object);
-		firstWhere = false;
+	// MAX(line number) over the bound composite key, through the L3 door's aggregate terminal —
+	// the DB uses any index on (recorder, line_number) instead of streaming the rowset. Only the
+	// BOUND dimensions constrain (FindKeyValue filter), each decomposed inside L3. No statement.
+	lastNum = 1;
+	try {
+		ibDataQueryBuilder q;
+		q.From(m_metaObject->GetQueryable());
+		for (const auto object : m_metaObject->GetGenericDimensionArrayObject()) {
+			if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
+				continue;
+			q.Where(object, m_keyValues.at(object->GetMetaID()));
+		}
+		q.Max(m_metaObject->GetRegisterLineNumber(), wxT("maxLine"));
+		ibDataQueryResult selection = q.SelectAggregate();
+		if (selection.Next()) {
+			const ibValue maxLine = selection.GetColumn(wxT("maxLine"));
+			if (!maxLine.IsEmpty()) {
+				lastNum = maxLine.GetNumber();
+				return true;
+			}
+		}
 	}
-	queryText += ";";
-
-	ibStatementGuard statement(db, db->PrepareStatement(queryText));
-	if (!statement)
-		return false;
-
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-		if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
-			continue;
-		ibValueMetaObjectAttributeBase::SetValueAttribute(
-			object,
-			m_keyValues.at(object->GetMetaID()),
-			statement.get(),
-			position
-		);
-	}
-
-	ibDatabaseResultSet* resultSet = statement->RunQueryWithResults();
-	if (resultSet == nullptr)
-		return false;
-	bool founded = false; lastNum = 1;
-	if (resultSet->Next() && !resultSet->IsFieldNull(1)) {
-		lastNum = resultSet->GetResultNumber(1);
-		founded = true;
-	}
-	db->CloseResultSet(resultSet);
-	return founded;
+	catch (...) {}
+	return false;
 }
 
 bool ibValueRecordSetObject::ReadData(const ibUniqueKeyPair& key)
 {
-	const auto db = ses_query;
+	ibValueModelRamTableBase::Clear();
 
-	ibValueModelRamTableBase::Clear(); int position = 1;
-
-	wxString tableName = m_metaObject->GetTableNameDB();
-	wxString queryText = "SELECT * FROM " + tableName; bool firstWhere = true;
-
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-		if (!key.FindKey(object->GetMetaID()))
-			continue;
-		if (firstWhere) {
-			queryText = queryText + " WHERE ";
+	// Composite-key read through the L3 door — only the bound dimensions (key.FindKey)
+	// constrain, decomposed inside L3. Each row's dimensions AND resources come from
+	// the L3 selection (GetValue) — no raw result set, no statement here.
+	try {
+		ibDataQueryBuilder q;
+		q.From(m_metaObject->GetQueryable());
+		for (const auto object : m_metaObject->GetGenericDimensionArrayObject()) {
+			if (!key.FindKey(object->GetMetaID()))
+				continue;
+			q.Where(object, ibComparisonType::ibComparisonType_Equal,
+				key.GetKey(object->GetMetaID()));
 		}
-		queryText = queryText +
-			(firstWhere ? " " : " AND ") + ibValueMetaObjectAttributeBase::GetCompositeSQLFieldName(object);
-		if (firstWhere) {
-			firstWhere = false;
+		ibReadPageRequest page;
+		page.m_count = 0;   // every matching line
+		ibDataQueryResult selection = q.Execute(page);
+		while (selection.Next()) {
+			ibValueTableRow* rowData = new ibValueTableRow();
+			for (const auto object : m_metaObject->GetGenericDimensionArrayObject())
+				rowData->AppendTableValue(object->GetMetaID()) = selection.GetValue(object);
+			for (const auto object : m_metaObject->GetGenericAttributeArrayObject())
+				rowData->AppendTableValue(object->GetMetaID()) = selection.GetValue(object);
+			ibValueModelRamTableBase::Append(rowData, !ibBackendException::IsEvalMode());
+			m_selected = true;
 		}
 	}
-	ibStatementGuard statement(db, db->PrepareStatement(queryText));
-	if (!statement)
-		return false;
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-		if (!key.FindKey(object->GetMetaID()))
-			continue;
-		ibValueMetaObjectAttributeBase::SetValueAttribute(
-			object,
-			key.GetKey(object->GetMetaID()),
-			statement.get(),
-			position
-		);
-	}
-	ibDatabaseResultSet* resultSet = statement->RunQueryWithResults();
-	if (resultSet == nullptr)
-		return false;
-	while (resultSet->Next()) {
-		ibValueTableRow* rowData = new ibValueTableRow();
-		for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-			ibValueMetaObjectAttributeBase::GetValueAttribute(object, rowData->AppendTableValue(object->GetMetaID()), resultSet);
-		}
-		for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
-			ibValueMetaObjectAttributeBase::GetValueAttribute(object, rowData->AppendTableValue(object->GetMetaID()), resultSet);
-		}
-		ibValueModelRamTableBase::Append(rowData, !ibBackendException::IsEvalMode());
-		m_selected = true;
-	}
-
-	db->CloseResultSet(resultSet);
+	catch (...) { return false; }
 
 	return GetRowCount() > 0;
 }
 
 bool ibValueRecordSetObject::ReadData()
 {
-	const auto db = ses_query;
+	ibValueModelRamTableBase::Clear();
 
-	ibValueModelRamTableBase::Clear(); int position = 1;
-
-	wxString tableName = m_metaObject->GetTableNameDB();
-	wxString queryText = "SELECT * FROM " + tableName; bool firstWhere = true;
-
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-		if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
-			continue;
-		if (firstWhere) {
-			queryText = queryText + " WHERE ";
+	// As ReadData(key) but scoped by the current m_keyValues (FindKeyValue filter).
+	try {
+		ibDataQueryBuilder q;
+		q.From(m_metaObject->GetQueryable());
+		for (const auto object : m_metaObject->GetGenericDimensionArrayObject()) {
+			if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
+				continue;
+			q.Where(object, ibComparisonType::ibComparisonType_Equal,
+				m_keyValues.at(object->GetMetaID()));
 		}
-		queryText = queryText +
-			(firstWhere ? " " : " AND ") + ibValueMetaObjectAttributeBase::GetCompositeSQLFieldName(object);
-		if (firstWhere) {
-			firstWhere = false;
+		ibReadPageRequest page;
+		page.m_count = 0;   // every matching line
+		ibDataQueryResult selection = q.Execute(page);
+		while (selection.Next()) {
+			ibValueTableRow* rowData = new ibValueTableRow();
+			for (const auto object : m_metaObject->GetGenericDimensionArrayObject())
+				rowData->AppendTableValue(object->GetMetaID()) = selection.GetValue(object);
+			for (const auto object : m_metaObject->GetGenericAttributeArrayObject())
+				rowData->AppendTableValue(object->GetMetaID()) = selection.GetValue(object);
+			ibValueModelRamTableBase::Append(rowData, !ibBackendException::IsEvalMode());
+			m_selected = true;
 		}
 	}
-	ibStatementGuard statement(db, db->PrepareStatement(queryText));
-	if (!statement)
-		return false;
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-		if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
-			continue;
-		ibValueMetaObjectAttributeBase::SetValueAttribute(
-			object,
-			m_keyValues.at(object->GetMetaID()),
-			statement.get(),
-			position
-		);
-	}
-	ibDatabaseResultSet* resultSet = statement->RunQueryWithResults();
-	if (resultSet == nullptr)
-		return false;
-	while (resultSet->Next()) {
-		ibValueTableRow* rowData = new ibValueTableRow();
-		for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-			ibValueMetaObjectAttributeBase::GetValueAttribute(object, rowData->AppendTableValue(object->GetMetaID()), resultSet);
-		}
-		for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
-			ibValueMetaObjectAttributeBase::GetValueAttribute(object, rowData->AppendTableValue(object->GetMetaID()), resultSet);
-		}
-		ibValueModelRamTableBase::Append(rowData, !ibBackendException::IsEvalMode());
-		m_selected = true;
-	}
-
-	db->CloseResultSet(resultSet);
+	catch (...) { return false; }
 
 	return GetRowCount() > 0;
 }
 
 bool ibValueRecordSetObject::SaveData(bool replace, bool clearTable)
 {
-	const auto db = ses_query;
-
-	//check fill attributes 
+	//check fill attributes
 	bool fillCheck = true; long currLine = 1;
 	for (long row = 0; row < GetRowCount(); row++) {
 		for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
@@ -262,149 +265,65 @@ bool ibValueRecordSetObject::SaveData(bool replace, bool clearTable)
 		}
 	}
 
-	wxString tableName = m_metaObject->GetTableNameDB(); wxString queryText; bool firstUpdate = true;
-	if (db->GetDatabaseLayerType() != DATABASELAYER_FIREBIRD) {
-		queryText = "INSERT INTO " + tableName + " (";
-	}
-	else {
-		queryText = "UPDATE OR INSERT INTO " + tableName + " (";
-	}
-	for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
-		queryText += (firstUpdate ? "" : ",") + ibValueMetaObjectAttributeBase::GetSQLFieldName(object);
-		if (firstUpdate) {
-			firstUpdate = false;
-		}
-	}
-	queryText += ") VALUES ("; bool firstInsert = true;
-	for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
-		unsigned int fieldCount = ibValueMetaObjectAttributeBase::GetSQLFieldCount(object);
-		for (unsigned int i = 0; i < fieldCount; i++) {
-			queryText += (firstInsert ? "?" : ",?");
-			if (firstInsert) {
-				firstInsert = false;
-			}
-		}
-	}
-
-	if (db->GetDatabaseLayerType() != DATABASELAYER_FIREBIRD) {
-		queryText += ")";
-	}
-	else {
-		queryText += ") MATCHING (";
-		if (m_metaObject->HasRecorder()) {
-			ibValueMetaObjectAttributePredefined* attributeRecorder = m_metaObject->GetRegisterRecorder();
-			wxASSERT(attributeRecorder);
-			queryText += ibValueMetaObjectAttributeBase::GetSQLFieldName(attributeRecorder);
-			ibValueMetaObjectAttributePredefined* attributeNumberLine = m_metaObject->GetRegisterLineNumber();
-			wxASSERT(attributeNumberLine);
-			queryText += "," + ibValueMetaObjectAttributeBase::GetSQLFieldName(attributeNumberLine);
-		}
-		else
-		{
-			bool firstMatching = true;
-			for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-				queryText += (firstMatching ? "" : ",") + ibValueMetaObjectAttributeBase::GetSQLFieldName(object);
-				if (firstMatching) {
-					firstMatching = false;
-				}
-			}
-		}
-		queryText += ");";
-	}
-
-	ibPreparedStatement* statement = db->PrepareStatement(queryText);
-	if (statement == nullptr)
-		return false;
-
+	// UPSERT each line through the L3 write door. The match keys are the register's identity
+	// columns, AUTO-detected by IsPrimaryKey — recorder + line number for a recorder-based
+	// register, period + dimensions for an information register — so there is no explicit match
+	// list and no FB/PG fork (the dialect closes the UPSERT spelling).
 	bool hasError = false;
 
-	for (long row = 0; row < GetRowCount(); row++) {
-		if (hasError)
-			break;
-		int position = 1;
+	for (long row = 0; row < GetRowCount() && !hasError; row++) {
+		// Each line's assignments BY COLUMN: a key value, the auto line number, or the row's
+		// value. No fields, no positions — the door / provider owns those.
+		ibDataQueryBuilder q;
+		q.From(m_metaObject->GetQueryable());
 		for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
 			auto foundedKey = m_keyValues.find(object->GetMetaID());
-			if (foundedKey != m_keyValues.end()) {
-				ibValueMetaObjectAttributeBase::SetValueAttribute(
-					object,
-					foundedKey->second,
-					statement,
-					position
-				);
-			}
-			else if (m_metaObject->IsRegisterLineNumber(object->GetMetaID())) {
-				ibValueMetaObjectAttributeBase::SetValueAttribute(
-					object,
-					numberLine++,
-					statement,
-					position
-				);
-			}
+			if (foundedKey != m_keyValues.end())
+				q.SetValue(object, foundedKey->second);
+			else if (m_metaObject->IsRegisterLineNumber(object->GetMetaID()))
+				q.SetValue(object, ibValue(numberLine++));
 			else {
-				ibValueTableRow* node = GetViewData< ibValueTableRow>(GetItem(row));
+				ibValueTableRow* node = GetViewData<ibValueTableRow>(GetItem(row));
 				wxASSERT(node);
-				ibValueMetaObjectAttributeBase::SetValueAttribute(
-					object,
-					node->GetTableValue(object->GetMetaID()),
-					statement,
-					position
-				);
+				q.SetValue(object, node->GetTableValue(object->GetMetaID()));
 			}
 		}
-
-		hasError = statement->RunQuery() == DATABASE_LAYER_QUERY_RESULT_ERROR;
+		hasError = !q.Upsert();
 	}
-
-	db->CloseStatement(statement);
 
 	if (!hasError && !SaveVirtualTable())
 		return false;
 
-	if (!hasError && clearTable)
-		ibValueModelRamTableBase::Clear();
-	else if (!clearTable)
-		m_selected = true;
+	if (!hasError) {
+		// m_selected drives IsEmpty()/IsNewObject(); it must reflect the persisted
+		// DB state, not whether the RAM table is currently populated. The old code
+		// only set it on the !clearTable branch, so a normal write-with-clear left a
+		// freshly-written set reporting empty/new. replace → exactly the rows just
+		// written; append → those plus whatever already existed.
+		const long savedRows = GetRowCount();
+		if (clearTable)
+			ibValueModelRamTableBase::Clear();
+		m_selected = (savedRows > 0) || (!replace && m_selected);
+	}
 
 	return !hasError;
 }
 
 bool ibValueRecordSetObject::DeleteData()
 {
-	const auto db = ses_query;
-
-	wxString tableName = m_metaObject->GetTableNameDB();
-	wxString queryText = "DELETE FROM " + tableName; bool firstWhere = true;
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
+	// DELETE the record set by its key — WHERE the register's identity columns present in
+	// m_keyValues (recorder / period + dimensions) = value, through the L3 write door. It
+	// expands each column to its physical fields and binds. No fields, no positions here.
+	ibDataQueryBuilder q;
+	q.From(m_metaObject->GetQueryable());
+	for (const auto object : m_metaObject->GetGenericDimensionArrayObject()) {
 		if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
 			continue;
-		if (firstWhere) {
-			queryText = queryText + " WHERE ";
-		}
-		queryText = queryText +
-			(firstWhere ? " " : " AND ") + ibValueMetaObjectAttributeBase::GetCompositeSQLFieldName(object);
-		if (firstWhere) {
-			firstWhere = false;
-		}
+		q.Where(object, m_keyValues.at(object->GetMetaID()));
 	}
+	q.Delete();
 
-	ibPreparedStatement* statement = db->PrepareStatement(queryText); int position = 1;
-
-	if (statement == nullptr)
-		return false;
-
-	for (const auto object : m_metaObject->GetGenericDimentionArrayObject()) {
-		if (!ibValueRecordSetObject::FindKeyValue(object->GetMetaID()))
-			continue;
-		ibValueMetaObjectAttributeBase::SetValueAttribute(
-			object,
-			m_keyValues.at(object->GetMetaID()),
-			statement,
-			position
-		);
-	}
-
-	statement->RunQuery();
-	db->CloseStatement(statement);
+	m_selected = false; // the record set no longer exists in the DB
 	return DeleteVirtualTable();
 }
 

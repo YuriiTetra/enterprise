@@ -6,7 +6,6 @@
 #include "frontend/win/ctrls/controlTextEditor.h"
 #endif
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueTextCtrl, ibValueWindow)
 
 //****************************************************************************
 
@@ -18,23 +17,23 @@ bool ibValueTextCtrl::GetChoiceForm(ibPropertyList* property)
 {
 	const ibMetaData* metaData = GetMetaData();
 	if (metaData != nullptr) {
-		ibValueMetaObjectRecordDataRef* metaObject = nullptr;
+		const ibValueMetaObjectRecordDataRef* metaObject = nullptr;
 		if (!m_propertySource->IsEmptyProperty()) {
 			const ibValueMetaObjectGenericData* metaObjectValue =
 				m_formOwner->GetMetaObject();
 			if (metaObjectValue != nullptr) {
-				const ibValueMetaObjectAttributeBase* attribute = wxDynamicCast(metaObjectValue->FindAnyObjectByFilter(m_propertySource->GetValueAsSource()), ibValueMetaObjectAttributeBase);
+				const ibValueMetaObjectAttributeBase* attribute = dynamic_cast<ibValueMetaObjectAttributeBase*>(metaObjectValue->FindAnyObjectByFilter(m_propertySource->GetValueAsSource()));
 				wxASSERT(attribute);
 				const ibCtorMetaValueType* so = metaData->GetTypeCtor(attribute->GetFirstClsid());
 				if (so != nullptr) {
-					metaObject = wxDynamicCast(so->GetMetaObject(), ibValueMetaObjectRecordDataRef);
+					metaObject = dynamic_cast<const ibValueMetaObjectRecordDataRef*>(so->GetMetaObject());
 				}
 			}
 		}
 		else {
 			const ibCtorMetaValueType* so = metaData->GetTypeCtor(ibTypeControlFactory::GetFirstClsid());
 			if (so != nullptr) {
-				metaObject = wxDynamicCast(so->GetMetaObject(), ibValueMetaObjectRecordDataRef);
+				metaObject = dynamic_cast<const ibValueMetaObjectRecordDataRef*>(so->GetMetaObject());
 			}
 		}
 
@@ -70,28 +69,27 @@ enum prop {
 ibValueTextCtrl::ibValueTextCtrl() :
 	ibValueWindow(), ibTypeControlFactory(), m_textModified(false)
 {
+	m_members.Bind(this, &ibValueTextCtrl::FillControlMembers);
 	//set default params
 	m_propertyBG->SetValue(wxColour(255, 255, 255));
 }
 
-ibMetaData* ibValueTextCtrl::GetMetaData() const
+const ibMetaData* ibValueTextCtrl::GetMetaData() const
 {
 	return m_formOwner != nullptr ?
 		m_formOwner->GetMetaData() : nullptr;
 }
 
-void ibValueTextCtrl::PrepareNames() const
+void ibValueTextCtrl::FillControlMembers(ibMemberTable& helper) const
 {
-	ibValueFrame::PrepareNames();
-
-	m_methodHelper->AppendProp(wxT("Value"), eControlValue, eControl);
+	helper.AppendProp(wxT("Value"), eControlValue, eControl);
 }
 
 bool ibValueTextCtrl::SetPropVal(const long lPropNum, const ibValue& varPropVal)
 {
-	const long lPropAlias = m_methodHelper->GetPropAlias(lPropNum); bool refreshColumn = false;
+	const long lPropAlias = m_members.GetPropAlias(lPropNum); bool refreshColumn = false;
 	if (lPropAlias == eControl) {
-		const long lPropData = m_methodHelper->GetPropData(lPropNum);
+		const long lPropData = m_members.GetPropData(lPropNum);
 		if (lPropData == eControlValue) {
 			SetControlValue(varPropVal);
 		}
@@ -102,9 +100,9 @@ bool ibValueTextCtrl::SetPropVal(const long lPropNum, const ibValue& varPropVal)
 
 bool ibValueTextCtrl::GetPropVal(const long lPropNum, ibValue& pvarPropVal)
 {
-	const long lPropAlias = m_methodHelper->GetPropAlias(lPropNum);
+	const long lPropAlias = m_members.GetPropAlias(lPropNum);
 	if (lPropAlias == eControl) {
-		const long lPropData = m_methodHelper->GetPropData(lPropNum);
+		const long lPropData = m_members.GetPropData(lPropNum);
 		if (lPropData == eControlValue) {
 			return GetControlValue(pvarPropVal);
 		}

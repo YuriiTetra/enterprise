@@ -2,12 +2,12 @@
 #include "list/objectList.h"
 #include "backend/metadataConfiguration.h"
 #include "backend/moduleManager/moduleManager.h"
+#include "backend/query/queryableHooks.h"   // light L4 source registration hooks (balance / turnover descriptors)
 
 //***********************************************************************
 //*                         metaData                                    * 
 //***********************************************************************
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectAccumulationRegister, ibValueMetaObjectRegisterData);
 
 /////////////////////////////////////////////////////////////////////////
 
@@ -38,7 +38,7 @@ ibBackendValueForm* ibValueMetaObjectAccumulationRegister::GetListForm(const wxS
 	return ibValueMetaObjectGenericData::CreateAndBuildForm(
 		strFormName,
 		ibValueMetaObjectAccumulationRegister::eFormList,
-		ownerControl, ibValue::CreateAndPrepareValueRef<ibValueListRegisterObject>(this, ibValueMetaObjectAccumulationRegister::eFormList),
+		ownerControl, new ibValueListRegisterObject(this, ibValueMetaObjectAccumulationRegister::eFormList),
 		formGuid
 	);
 }
@@ -193,6 +193,12 @@ bool ibValueMetaObjectAccumulationRegister::OnAfterRunMetaObject(int flags)
 	if (!(*m_propertyObjectModule)->OnAfterRunMetaObject(flags))
 		return false;
 
+	// Custom virtual-table descriptors (balances / turnovers). The base records descriptor is
+	// registered by ibValueMetaObjectRegisterData::OnAfterRunMetaObject below. Skip onlyLoadFlag.
+	if (!(flags & onlyLoadFlag)) {
+		ibRegisterQueryableSource(&m_balance);
+		ibRegisterQueryableSource(&m_turnover);
+	}
 
 	if (auto* cc = m_metaData->GetCompileCache()) {
 
@@ -210,6 +216,9 @@ bool ibValueMetaObjectAccumulationRegister::OnAfterRunMetaObject(int flags)
 
 bool ibValueMetaObjectAccumulationRegister::OnBeforeCloseMetaObject()
 {
+	ibUnregisterQueryableSource(&m_balance);
+	ibUnregisterQueryableSource(&m_turnover);
+
 	if (!(*m_propertyAttributibRecordType)->OnBeforeCloseMetaObject())
 		return false;
 
@@ -268,14 +277,14 @@ void ibValueMetaObjectAccumulationRegister::OnRemoveMetaForm(ibValueMetaObjectFo
 	if (metaForm->GetTypeForm() == ibValueMetaObjectAccumulationRegister::eFormList
 		&& m_propertyDefFormList->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormList->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormList->SetValue(wxNOT_FOUND);
 	}
 }
 #include "accumulationRegisterManager.h"
 
 ibValueManagerDataObject* ibValueMetaObjectAccumulationRegister::CreateManagerDataObjectValue() const
 {
-	return ibValue::CreateAndPrepareValueRef<ibValueManagerDataObjectAccumulationRegister>(this);
+	return new ibValueManagerDataObjectAccumulationRegister(this);
 }
 
 ibValueRecordSetObject* ibValueMetaObjectAccumulationRegister::CreateRecordSetObjectRegValue(const ibUniqueKeyPair& uniqueKey) const
@@ -283,11 +292,11 @@ ibValueRecordSetObject* ibValueMetaObjectAccumulationRegister::CreateRecordSetOb
 	if (auto* cc = m_metaData->GetCompileCache()) {
 		ibValueRecordSetObject* pDataRef = nullptr;
 		if (!cc->FindCompileModule(m_propertyObjectModule->GetMetaObject(), pDataRef)) {
-			return ibValue::CreateAndPrepareValueRef<ibValueRecordSetObjectAccumulationRegister>(this, uniqueKey);
+			return new ibValueRecordSetObjectAccumulationRegister(this, uniqueKey);
 		}
 		return pDataRef;
 	}
-	return ibValue::CreateAndPrepareValueRef<ibValueRecordSetObjectAccumulationRegister>(this, uniqueKey);
+	return new ibValueRecordSetObjectAccumulationRegister(this, uniqueKey);
 }
 
 ibSourceDataObject* ibValueMetaObjectAccumulationRegister::CreateSourceObject(const ibValueMetaObjectFormBase* metaObject) const
@@ -295,7 +304,7 @@ ibSourceDataObject* ibValueMetaObjectAccumulationRegister::CreateSourceObject(co
 	switch (metaObject->GetTypeForm())
 	{
 	case eFormList:
-		return ibValue::CreateAndPrepareValueRef<ibValueListRegisterObject>(this, metaObject->GetTypeForm());
+		return new ibValueListRegisterObject(this, metaObject->GetTypeForm());
 	}
 
 	return nullptr;

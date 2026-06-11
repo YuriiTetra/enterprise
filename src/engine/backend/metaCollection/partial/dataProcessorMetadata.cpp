@@ -1,4 +1,4 @@
-﻿////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////
 //	Author		: Maxim Kornienko
 //	Description : dataProcessor - metaData
 ////////////////////////////////////////////////////////////////////////////
@@ -9,8 +9,6 @@
 #include "backend/moduleManager/moduleManagerExt.h"
 #include "backend/session/session.h"
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectDataProcessor, ibValueMetaObjectRecordDataExt)
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectExternalDataProcessor, ibValueMetaObjectDataProcessor)
 
 //********************************************************************************************
 //*                                      metaData                                            *
@@ -37,7 +35,7 @@ ibValueMetaObjectFormBase* ibValueMetaObjectDataProcessor::GetDefaultFormByID(co
 
 ibValueManagerDataObject* ibValueMetaObjectDataProcessor::CreateManagerDataObjectValue() const
 {
-	return ibValue::CreateAndPrepareValueRef<ibValueManagerDataObjectDataProcessor>(this);
+	return new ibValueManagerDataObjectDataProcessor(this);
 }
 
 #include "backend/appData.h"
@@ -58,7 +56,7 @@ ibValueRecordDataObjectExt* ibValueMetaObjectDataProcessor::CreateObjectExtValue
 		if (cc->FindCompileModule(m_propertyObjectModule->GetMetaObject(), pDataRef))
 			return pDataRef;
 	}
-	return ibValue::CreateAndPrepareValueRef<ibValueRecordDataObjectDataProcessor>(this);
+	return new ibValueRecordDataObjectDataProcessor(this);
 }
 
 ibSourceDataObject* ibValueMetaObjectDataProcessor::CreateSourceObject(const ibValueMetaObjectFormBase* metaObject) const
@@ -95,7 +93,7 @@ bool ibValueMetaObjectDataProcessor::LoadData(ibReaderMemory& dataReader)
 	(*m_propertyObjectModule)->LoadMeta(dataReader);
 	(*m_propertyManagerModule)->LoadMeta(dataReader);
 
-	//Load default form 
+	//Load default form
 	m_propertyDefFormObject->SetValue(GetIdByGuid(dataReader.r_stringZ()));
 
 	return ibValueMetaObjectRecordDataExt::LoadData(dataReader);
@@ -107,7 +105,7 @@ bool ibValueMetaObjectDataProcessor::SaveData(ibWriterMemory& dataWritter)
 	(*m_propertyObjectModule)->SaveMeta(dataWritter);
 	(*m_propertyManagerModule)->SaveMeta(dataWritter);
 
-	//Save default form 
+	//Save default form
 	dataWritter.w_stringZ(GetGuidByID(m_propertyDefFormObject->GetValueAsInteger()));
 
 	return ibValueMetaObjectRecordDataExt::SaveData(dataWritter);
@@ -275,7 +273,7 @@ void ibValueMetaObjectDataProcessor::OnRemoveMetaForm(ibValueMetaObjectFormBase*
 	if (metaForm->GetTypeForm() == ibValueMetaObjectDataProcessor::eFormDataProcessor
 		&& m_propertyDefFormObject->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormObject->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormObject->SetValue(wxNOT_FOUND);
 	}
 }
 

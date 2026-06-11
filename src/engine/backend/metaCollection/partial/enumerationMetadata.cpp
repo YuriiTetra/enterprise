@@ -7,7 +7,6 @@
 #include "backend/metaData.h"
 #include "list/objectList.h"
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectEnumeration, ibValueMetaObjectRecordDataEnumRef)
 
 //********************************************************************************************
 
@@ -43,7 +42,7 @@ ibValueMetaObjectFormBase* ibValueMetaObjectEnumeration::GetDefaultFormByID(cons
 
 ibValueManagerDataObject* ibValueMetaObjectEnumeration::CreateManagerDataObjectValue() const
 {
-	return ibValue::CreateAndPrepareValueRef<ibValueManagerDataObjectEnumeration>(this);
+	return new ibValueManagerDataObjectEnumeration(this);
 }
 
 ibSourceDataObject* ibValueMetaObjectEnumeration::CreateSourceObject(const ibValueMetaObjectFormBase* metaObject) const
@@ -51,9 +50,9 @@ ibSourceDataObject* ibValueMetaObjectEnumeration::CreateSourceObject(const ibVal
 	switch (metaObject->GetTypeForm())
 	{
 	case eFormList:
-		return ibValue::CreateAndPrepareValueRef<ibValueListDataObjectEnumRef>(this, metaObject->GetTypeForm());
+		return new ibValueListDataObjectEnumRef(this, metaObject->GetTypeForm());
 	case eFormSelect:
-		return ibValue::CreateAndPrepareValueRef<ibValueListDataObjectEnumRef>(this, metaObject->GetTypeForm(), true);
+		return new ibValueListDataObjectEnumRef(this, metaObject->GetTypeForm(), true);
 	}
 
 	return nullptr;
@@ -65,7 +64,7 @@ ibBackendValueForm* ibValueMetaObjectEnumeration::GetListForm(const wxString& st
 	return ibValueMetaObjectGenericData::CreateAndBuildForm(
 		strFormName,
 		ibValueMetaObjectEnumeration::eFormList,
-		ownerControl, ibValue::CreateAndPrepareValueRef<ibValueListDataObjectEnumRef>(this, ibValueMetaObjectEnumeration::eFormList),
+		ownerControl, new ibValueListDataObjectEnumRef(this, ibValueMetaObjectEnumeration::eFormList),
 		formGuid
 	);
 }
@@ -75,7 +74,7 @@ ibBackendValueForm* ibValueMetaObjectEnumeration::GetSelectForm(const wxString& 
 	return ibValueMetaObjectGenericData::CreateAndBuildForm(
 		strFormName,
 		ibValueMetaObjectEnumeration::eFormSelect,
-		ownerControl, ibValue::CreateAndPrepareValueRef<ibValueListDataObjectEnumRef>(this, ibValueMetaObjectEnumeration::eFormSelect, true),
+		ownerControl, new ibValueListDataObjectEnumRef(this, ibValueMetaObjectEnumeration::eFormSelect, true),
 		formGuid
 	);
 }
@@ -223,12 +222,12 @@ void ibValueMetaObjectEnumeration::OnRemoveMetaForm(ibValueMetaObjectFormBase* m
 	if (metaForm->GetTypeForm() == ibValueMetaObjectEnumeration::eFormList
 		&& m_propertyDefFormList->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormList->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormList->SetValue(wxNOT_FOUND);
 	}
 	else if (metaForm->GetTypeForm() == ibValueMetaObjectEnumeration::eFormSelect
 		&& m_propertyDefFormSelect->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormSelect->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormSelect->SetValue(wxNOT_FOUND);
 	}
 }
 

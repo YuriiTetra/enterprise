@@ -4,9 +4,11 @@
 #include "backend/compiler/value.h"
 
 //Array support
-class BACKEND_API ibValueColour : public ibValue
+void ibValueColour_BindNames(ibValue::ibMemberTable& helper, const ibValue* ctx);
+
+class BACKEND_API ibValueColour : public ibValueStaticMembers<&ibValueColour_BindNames>
 {
-	wxDECLARE_DYNAMIC_CLASS(ibValueColour);
+	public:
 
 public:
 
@@ -28,17 +30,9 @@ public:
 		return !m_colour.IsOk();
 	}
 
-	static ibValueMethodHelper m_methodHelper;
-
 	virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal);        //setting attribute
 	virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal);                   //attribute value
-
-	virtual ibValueMethodHelper* GetPMethods() const {
-		//PrepareNames();
-		return &m_methodHelper;
-	}
-	
-	virtual void PrepareNames() const;                         // this method is automatically called to initialize attribute and method names.
+	// DoGetPMethods (protected) + Shared<&ibValueColour_BindNames> come from the base.
 
 	operator wxColour() const { return m_colour; }
 };

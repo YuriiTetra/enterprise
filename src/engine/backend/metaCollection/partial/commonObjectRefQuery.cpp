@@ -1,4 +1,4 @@
-﻿////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////
 //	Author		: Maxim Kornienko
 //	Description : ibValueRecordDataObjectRef — instance Read / Save /
 //	              Delete on the runtime-data side. Routes through
@@ -13,12 +13,20 @@
 #include "backend/appData.h"
 #include "backend/session/session.h"
 #include "backend/databaseLayer/connectionPool.h"
+#include "backend/databaseLayer/connectionScope.h"
 #include "backend/databaseLayer/databaseErrorCodes.h"
+#include "backend/backend_form.h"
+#include "backend/logger/logger.h"
 
 #include "backend/metaCollection/partial/tabularSection/tabularSection.h"
+#include "backend/metaCollection/partial/reference/reference.h"
 #include "backend/metaCollection/attribute/metaAttributeObject.h"
+#include "backend/query/dataQueryBuilder.h"      // L3 door — record read / write / delete via the universal entry
 
 #include "backend/system/systemManager.h"
+#include "backend/backend_exception.h"
+#include "backend/utils/dataVersion.hpp"
+#include "backend/lock/lockManager.h"
 
 bool ibValueRecordDataObjectRef::ReadData()
 {
@@ -27,32 +35,27 @@ bool ibValueRecordDataObjectRef::ReadData()
 
 bool ibValueRecordDataObjectRef::ReadData(const ibGuid& srcGuid)
 {
-	const auto db = ses_query;   // session-bound conn; throws if no active session
-
 	if (m_newObject && !srcGuid.isValid())
 		return false;
 	wxASSERT(m_metaObject);
-	const wxString tableName = m_metaObject->GetTableNameDB();
 
-	// No TableExists probe — table is created at metadata-apply time and
-	// is a hard precondition for any descriptor data op. PrepareStatement
-	// returns null on missing-table; we treat that as no data.
-	const wxString sql = (db->GetDatabaseLayerType() == DATABASELAYER_FIREBIRD)
-		? wxString("SELECT FIRST 1 * FROM " + tableName + " WHERE uuid = ?;")
-		: wxString("SELECT * FROM " + tableName + " WHERE uuid = ? LIMIT 1;");
-	ibStatementGuard st(db, db->PrepareStatement(sql));
-	if (!st) return false;
-	st->SetParamString(1, srcGuid.str());
-	ibDatabaseResultSet* resultSet = st->RunQueryWithResults();
-	if (resultSet == nullptr) return false;
+	// (half-)L3 read: load the row by its OWN key through the universal door.
+	// The dialect FIRST/LIMIT fork is closed by L2; the default door pulls the
+	// session holder, so this still joins any open document-save TX (the old
+	// ses_query path). No TableExists probe — the table is a hard precondition.
+	ibDataQueryBuilder readQuery;
+	readQuery.From(m_metaObject->GetQueryable()).WhereKey(srcGuid);
+	ibReadPageRequest page;
+	page.m_count = 1;
+
 	bool succes = false;
-	if (resultSet->Next()) {
+	ibDataQueryResult selection = readQuery.Execute(page);
+	if (selection.Next()) {
 		succes = true;
 		//load other attributes
 		for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
-			if (!m_metaObject->IsDataReference(object->GetMetaID())) {
-				ibValueMetaObjectAttributeBase::GetValueAttribute(object, m_listObjectValue[object->GetMetaID()], resultSet);
-			}
+			if (!m_metaObject->IsDataReference(object->GetMetaID()))
+				m_listObjectValue[object->GetMetaID()] = selection.GetValue(object);
 		}
 		for (const auto object : m_metaObject->GetGenericTableArrayObject()) {
 			ibValueTabularSectionDataObjectRef* tabularSection = new ibValueTabularSectionDataObjectRef(this, object);
@@ -60,14 +63,209 @@ bool ibValueRecordDataObjectRef::ReadData(const ibGuid& srcGuid)
 			m_listObjectValue.insert_or_assign(object->GetMetaID(), tabularSection);
 		}
 	}
-	db->CloseResultSet(resultSet);
+	// selection's destructor closes the cursor + statement (RAII).
+
+	// Capture DataVersion at Read time — the Write/Delete path's
+	// LockAndCheckDataVersion compares this against the row's current
+	// version to detect concurrent updates. New objects (no row yet)
+	// leave m_loadedDataVersion empty so the check is skipped on first
+	// Save. See docs/record-locks.md.
+	if (succes && !m_newObject) {
+		const auto dvAttr = m_metaObject->GetDataVersion();
+		if (dvAttr != nullptr) {
+			const auto it = m_listObjectValue.find(dvAttr->GetMetaID());
+			if (it != m_listObjectValue.end())
+				m_loadedDataVersion = it->second.GetString();
+		}
+	}
 	return succes;
+}
+
+bool ibValueRecordDataObjectRef::TryAcquireFormLock(ibLockMode mode)
+{
+	if (m_newObject)            return true;  // no DB row to identify yet
+	if (m_formLockHandle.IsValid()) return true;  // already held
+
+	// Default options — wait at driver's normal lock-timeout. Throws
+	// ibBackendLockException::LockConflict if another session holds an
+	// incompatible lock; caller propagates as form-open failure.
+	auto* lm = ibApplicationData::GetLockManager();
+	if (lm == nullptr)
+		ibBackendCoreException::Error(_("Lock manager not initialised"));
+	m_formLockHandle = lm->Acquire({
+		ibLockItem::ForRef(m_metaObject->GetDocPath(), m_objGuid, mode)
+	});
+	return true;
+}
+
+bool ibValueRecordDataObjectRef::LockAndCheckDataVersion(bool bump)
+{
+	const auto dvAttr = m_metaObject != nullptr ? m_metaObject->GetDataVersion() : nullptr;
+
+	// No DataVersion attribute declared on this metaobject (shouldn't
+	// happen for mutable-refs — DataVersion is hard-wired in
+	// ibValueMetaObjectRecordDataMutableRef — but stay defensive so
+	// future metaobject kinds that opt out don't trip an assert).
+	if (dvAttr == nullptr)
+		return true;
+
+	const ibMetaID dvId = dvAttr->GetMetaID();
+
+	// Existing rows only — new ones have no DB row to lock and no
+	// prior version to compare. The bump still fires below so the
+	// freshly-inserted row carries a valid initial stamp.
+	if (!m_newObject && !m_loadedDataVersion.IsEmpty()) {
+		// Row lock + current-version read in ONE L3 selection: From(record).Where(uuid) with the
+		// page FOR-UPDATE flag (the dialect appends its RowLockHint via m_rowLockSuffix). Runs on
+		// the session holder — the SAME connection as the open write-scope TX — so the lock is held
+		// until commit. The version reads through GetValue(dvAttr), which assembles the attribute
+		// from its physical fields. DataVersion is NOT a single column: its SQL field name is the
+		// COMPOSITE "<fld>_TYPE,<fld>_S" (type tag + string data), so the former raw
+		// GetResultString(that) failed "field not found" — the provider's attribute assembly is the
+		// only correct read. (docs/record-locks.md)
+		ibDataQueryBuilder q;
+		q.From(m_metaObject->GetQueryable())
+		 .Where(ibRawDBColumn::String(wxT("uuid")), ibValue(wxString(m_objGuid)));
+		ibReadPageRequest page;
+		page.m_count         = 1;
+		page.m_lockForUpdate = true;
+		ibDataQueryResult sel = q.Execute(page);
+
+		const bool rowFound = sel.Next();
+		const wxString dbVer = rowFound ? sel.GetValue(dvAttr).GetString() : wxString();
+
+		// Row disappeared between our load and write — somebody else
+		// committed a DELETE. Treat as a version conflict for UX
+		// consistency: same "reload and retry" recovery path.
+		if (!rowFound) {
+			ibBackendLockException::VersionChangedThrow(
+				m_metaObject->GetSynonym(),
+				m_loadedDataVersion,
+				wxT("<deleted>"));
+		}
+
+		if (dbVer != m_loadedDataVersion) {
+			ibBackendLockException::VersionChangedThrow(
+				m_metaObject->GetSynonym(),
+				m_loadedDataVersion,
+				dbVer);
+		}
+	}
+
+	// Bump for Write paths so SaveData's UPSERT stamps the row with a
+	// fresh version. Skipped on Delete (the row is going away).
+	if (bump) {
+		const wxString newStamp = ibDataVersion::NewStamp();
+		SetValueByMetaID(dvId, ibValue(newStamp));
+		// Future ReadData→Write cycles on the same in-memory object
+		// (e.g. script that calls Write twice in a row without
+		// reloading) compare against the newly-stamped value, so the
+		// second Write sees consistency.
+		m_loadedDataVersion = newStamp;
+	}
+
+	return true;
+}
+
+//----------------------------------------------------------------------
+// Phase A scaffold helpers — pre/post bookkeeping extracted from the
+// per-subclass WriteObject / DeleteObject bodies. Lives here next to
+// the lock methods (TryAcquireFormLock / LockAndCheckDataVersion)
+// they call into — the helpers themselves are lock-orchestration over
+// the DB-query primitives, so this is their natural home.
+// See commonObject.h ibValueRecordDataObjectRef Begin*/Commit* docs.
+//----------------------------------------------------------------------
+
+bool ibValueRecordDataObjectRef::BeginWriteScope(ibConnectionScope& scope)
+{
+	if (appData->DesignerMode())          return false;   // designer skip
+	if (!scope || !scope->IsOpen())
+		ibBackendCoreException::Error(_("Database is not open!"));
+	if (ibBackendException::IsEvalMode()) return false;   // eval skip
+
+	if (!m_metaObject->AccessRight_Write()) {
+		ibBackendAccessException::Error();   // throws — return for warning silence
+		return false;
+	}
+
+	scope.SafeBeginTransaction();
+	TryAcquireFormLock();                                  // soft-lock re-attempt
+	LockAndCheckDataVersion(/*bump=*/true);                // row lock + version + bump
+	return true;
+}
+
+bool ibValueRecordDataObjectRef::BeginDeleteScope(ibConnectionScope& scope)
+{
+	if (appData->DesignerMode())          return false;
+	if (!scope || !scope->IsOpen())
+		ibBackendCoreException::Error(_("Database is not open!"));
+	if (ibBackendException::IsEvalMode()) return false;
+
+	if (!m_metaObject->AccessRight_Delete()) {
+		ibBackendAccessException::Error();
+		return false;
+	}
+
+	scope.SafeBeginTransaction();
+	TryAcquireFormLock();
+	LockAndCheckDataVersion(/*bump=*/false);               // no bump — row going away
+	return true;
+}
+
+void ibValueRecordDataObjectRef::CommitWriteScope(ibConnectionScope& scope,
+                                                   ibBackendValueForm* valueForm,
+                                                   bool newObject)
+{
+	scope.SafeCommitTransaction();
+
+	// Audit AFTER SafeCommitTransaction — the row is durable. If the
+	// commit threw, RAII rollback fires and we never get here. Source
+	// "record" is universal (Catalog / Document / ChartOf* all route
+	// through this scaffold); ref_guid + ref_meta_id let the viewer
+	// drill back to the actual object that was written.
+	if (ibLog && ibLog->IsEnabled(ibLogLevel::Audit)) {
+		const wxString refGuid = m_reference_impl
+			? ibGuid(m_reference_impl->m_guid).str()
+			: wxString();
+		const int refMetaId = m_reference_impl
+			? static_cast<int>(m_reference_impl->m_id)
+			: 0;
+		ibLog->Audit(wxT("record"),
+		             newObject ? wxT("created") : wxT("saved"),
+		             GetSourceCaption(),
+		             refGuid,
+		             refMetaId);
+	}
+
+	if (valueForm != nullptr) {
+		if (newObject) valueForm->NotifyCreate(GetReference());
+		else           valueForm->NotifyChange(GetReference());
+	}
+	m_objModified = false;
+}
+
+void ibValueRecordDataObjectRef::CommitDeleteScope(ibConnectionScope& scope,
+                                                    ibBackendValueForm* valueForm)
+{
+	scope.SafeCommitTransaction();
+
+	if (ibLog && ibLog->IsEnabled(ibLogLevel::Audit)) {
+		const wxString refGuid = m_reference_impl
+			? ibGuid(m_reference_impl->m_guid).str()
+			: wxString();
+		const int refMetaId = m_reference_impl
+			? static_cast<int>(m_reference_impl->m_id)
+			: 0;
+		ibLog->Audit(wxT("record"), wxT("deleted"),
+		             GetSourceCaption(), refGuid, refMetaId);
+	}
+
+	if (valueForm != nullptr)
+		valueForm->NotifyDelete(GetReference());
 }
 
 bool ibValueRecordDataObjectRef::SaveData()
 {
-	const auto db = ses_query;
-
 	//check fill attributes — find() so the probe doesn't auto-insert
 	//an empty value into m_listObjectValue.
 	bool fillCheck = true;
@@ -86,70 +284,36 @@ bool ibValueRecordDataObjectRef::SaveData()
 	if (!fillCheck)
 		return false;
 
-	// UPSERT main row in one statement — replaces the previous DELETE +
-	// INSERT pair (the outer DeleteData also cascade-DELETEd tabular
-	// sections, but tabularSection->SaveData below already does its own
-	// DELETE+INSERT, so the cascade was redundant work). Saves 1 main-row
-	// RT plus N redundant tabular-DELETE RTs per save.
-	const bool isFB = (db->GetDatabaseLayerType() == DATABASELAYER_FIREBIRD);
-	const wxString& tableName = m_metaObject->GetTableNameDB();
-
-	// Collect column names once — reused by UPSERT clauses below.
-	wxString cols = "uuid";
-	wxString placeholders = "?";
-	for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
-		if (m_metaObject->IsDataReference(object->GetMetaID()))
-			continue;
-		cols += ", " + ibValueMetaObjectAttributeBase::GetSQLFieldName(object);
-		const unsigned int fieldCount = ibValueMetaObjectAttributeBase::GetSQLFieldCount(object);
-		for (unsigned int i = 0; i < fieldCount; i++)
-			placeholders += ", ?";
-	}
-
-	wxString queryText;
-	if (isFB) {
-		// UPDATE OR INSERT — FB rewrites the row in place if PK matches.
-		queryText = "UPDATE OR INSERT INTO " + tableName + " (" + cols
-		          + ") VALUES (" + placeholders + ") MATCHING (uuid);";
-	} else {
-		// PG ON CONFLICT — assign every non-uuid column from EXCLUDED.
-		// GetExcludeSQLFieldName(attr) emits "<col>=excluded.<col>" for
-		// every sub-column of the attribute; reuse the same helper used
-		// by SetConstValue.
-		wxString assignments;
-		for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
-			if (m_metaObject->IsDataReference(object->GetMetaID()))
-				continue;
-			if (!assignments.empty()) assignments += ", ";
-			assignments += ibValueMetaObjectAttributeBase::GetExcludeSQLFieldName(object);
-		}
-		queryText = "INSERT INTO " + tableName + " (" + cols
-		          + ") VALUES (" + placeholders
-		          + ") ON CONFLICT (uuid) DO UPDATE SET " + assignments + ";";
-	}
-
-	ibStatementGuard statement(db, db->PrepareStatement(queryText));
-	if (!statement)
-		return false;
-
 	m_objGuid = m_reference_impl->m_guid;
-	statement->SetParamString(1, m_objGuid.str());
 
-	int position = 2;
-
+	// UPSERT the main row through the L3 door — BY COLUMN, no statement, no positions visible
+	// here: From(meta) + SetValue(col, value)* + Upsert(). uuid is the row-key — a RAW primary
+	// string column (the guid bound straight, no translation); the attributes are metadata
+	// columns. The provider decomposes each attribute into its physical columns and binds into
+	// a hidden L2 statement; the per-DBMS UPSERT spelling is closed by the dialect template;
+	// the match key is the queryable's row-key (uuid). The write goes through the session
+	// holder, so it joins the outer document-save TX.
+	ibDataQueryBuilder writer;
+	writer.From(m_metaObject->GetQueryable())
+	      .SetValue(ibRawDBColumn::String(wxT("uuid")), ibValue(m_objGuid));   // row-key value
 	for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
-		if (m_metaObject->IsDataReference(object->GetMetaID()))
-			continue;
-		ibValueMetaObjectAttributeBase::SetValueAttribute(
-			object,
-			m_listObjectValue.at(object->GetMetaID()),
-			statement.get(),
-			position
-		);
+		ibValue value;
+		if (m_metaObject->IsDataReference(object->GetMetaID())) {
+			// The row's OWN reference, written in the SAME binary form (_RTRef +
+			// _RRRef = ibReference[guid][metaID]) as any reference TO this row. That
+			// byte-identity is what makes a dot-walk JOIN equate
+			// source.fldX_RRRef = target.<selfref>_RRRef. CreateRaw skips PrepareRef
+			// (we only need the reference identity bytes, not materialised members).
+			value = ibValue(ibValueReferenceDataObject::CreateRaw(m_metaObject, m_objGuid));
+		}
+		else {
+			const auto it = m_listObjectValue.find(object->GetMetaID());
+			if (it != m_listObjectValue.end())
+				value = it->second;
+		}
+		writer.SetValue(object, value);
 	}
-
-	bool hasError =
-		statement->RunQuery() == DATABASE_LAYER_QUERY_RESULT_ERROR;
+	bool hasError = !writer.Upsert();
 
 	//table parts
 	if (!hasError) {
@@ -177,11 +341,8 @@ bool ibValueRecordDataObjectRef::SaveData()
 
 bool ibValueRecordDataObjectRef::DeleteData()
 {
-	const auto db = ses_query;
-
 	if (m_newObject)
 		return true;
-	const wxString& tableName = m_metaObject->GetTableNameDB();
 	//table parts
 	for (const auto object : m_metaObject->GetTableArrayObject()) {
 		ibValueTabularSectionDataObjectBase* tabularSection = nullptr;
@@ -193,11 +354,12 @@ bool ibValueRecordDataObjectRef::DeleteData()
 			return false;
 
 	}
-	ibStatementGuard del(db, db->PrepareStatement("DELETE FROM " + tableName + " WHERE uuid = ?;"));
-	if (del) {
-		del->SetParamString(1, m_objGuid.str());
-		del->RunQuery();
-	}
+	// Delete the main row through the L3 door — WHERE uuid = <guid>, no statement / L2 visible.
+	// Best-effort like the prior path (it ignored the result).
+	ibDataQueryBuilder()
+		.From(m_metaObject->GetQueryable())
+		.Where(ibRawDBColumn::String(wxT("uuid")), ibValue(m_objGuid))
+		.Delete();
 	return true;
 }
 
@@ -299,7 +461,7 @@ ibValue ibValueRecordDataObjectRef::GenerateNextIdentifier(ibValueMetaObjectAttr
 	const int driver = db->GetDatabaseLayerType();
 	if (driver != DATABASELAYER_FIREBIRD && driver != DATABASELAYER_POSTGRESQL)
 		ibBackendCoreException::Error(_("GenerateNextIdentifier requires Firebird or PostgreSQL"
-			" — atomic UPDATE...RETURNING is not portable to other backends."));
+			" - atomic UPDATE...RETURNING is not portable to other backends."));
 
 	// Period bucket — parking value for now; per-type periodicity (catalog
 	// vs document) is a future feature.

@@ -1,12 +1,13 @@
-﻿////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////
 //	Author		: Maxim Kornienko
 //	Description : metaTree window
 ////////////////////////////////////////////////////////////////////////////
 
 #include "treeConfiguration.h"
 #include "frontend/mainFrame/objinspect/objinspect.h"
-#include "frontend/docView/docManager.h"
+#include "frontend/docView/docView.h"
 #include "backend/appData.h"
+#include "backend/appEnv.h"
 
 #define metadataName _("Metadata")
 #define commonName _("Common")
@@ -52,9 +53,7 @@
 
 ibFormID ibMetaDataTree::SelectFormType(ibValueMetaObjectForm* metaObject) const
 {
-	ibValueMetaObjectGenericData* parent = wxDynamicCast(
-		metaObject->GetParent(), ibValueMetaObjectGenericData
-	);
+	ibValueMetaObjectGenericData* parent = dynamic_cast<ibValueMetaObjectGenericData*>(metaObject->GetParent());
 
 	ibDialogSelectTypeForm dlg(parent, metaObject);
 	ibFormTypeList optList = parent->GetFormType();
@@ -85,12 +84,12 @@ void ibMetaDataTree::Modify(bool modify)
 	}
 }
 
-bool ibMetaDataTree::OpenFormMDI(ibValueMetaObject* obj)
+bool ibMetaDataTree::OpenObjectForm(ibValueMetaObject* obj)
 {
 	ibMetaDocument* foundedDoc = GetDocument(obj);
 	//not found in the list of existing ones
 	if (foundedDoc == nullptr) {
-		foundedDoc = docManager->OpenFormMDI(obj, m_docParent, m_bReadOnly ? wxDOC_READONLY : wxDOC_NEW);
+		foundedDoc = docManager->OpenObjectForm(obj, m_docParent, m_bReadOnly ? ibDOC_READONLY : ibDOC_NEW);
 		//So there was no suitable template!
 		if (foundedDoc != nullptr)
 			return true;
@@ -104,13 +103,13 @@ bool ibMetaDataTree::OpenFormMDI(ibValueMetaObject* obj)
 	return false;
 }
 
-bool ibMetaDataTree::OpenFormMDI(ibValueMetaObject* obj, ibBackendMetaDocument*& doc)
+bool ibMetaDataTree::OpenObjectForm(ibValueMetaObject* obj, ibBackendMetaDocument*& doc)
 {
 	ibMetaDocument* foundedDoc = GetDocument(obj);
 
 	//not found in the list of existing ones
 	if (foundedDoc == nullptr) {
-		foundedDoc = docManager->OpenFormMDI(obj, m_docParent, m_bReadOnly ? wxDOC_READONLY : wxDOC_NEW);
+		foundedDoc = docManager->OpenObjectForm(obj, m_docParent, m_bReadOnly ? ibDOC_READONLY : ibDOC_NEW);
 		//So there was no suitable template!
 		if (foundedDoc != nullptr) {
 			doc = foundedDoc;
@@ -127,7 +126,7 @@ bool ibMetaDataTree::OpenFormMDI(ibValueMetaObject* obj, ibBackendMetaDocument*&
 	return false;
 }
 
-bool ibMetaDataTree::CloseFormMDI(ibValueMetaObject* obj)
+bool ibMetaDataTree::CloseObjectForm(ibValueMetaObject* obj)
 {
 	ibMetaDocument* foundedDoc = GetDocument(obj);
 
@@ -164,7 +163,7 @@ ibMetaDocument* ibMetaDataTree::GetDocument(ibValueMetaObject* obj) const
 
 void ibMetaDataTree::EditModule(const ibGuid& moduleName, int lineNumber, bool setRunLine)
 {
-	const ibMetaData* metaData = GetMetaData();
+	ibMetaData* metaData = GetMetaData();
 	if (metaData == nullptr)
 		return;
 
@@ -180,9 +179,9 @@ void ibMetaDataTree::EditModule(const ibGuid& moduleName, int lineNumber, bool s
 
 	//not found in the list of existing ones
 	if (foundedDoc == nullptr)
-		foundedDoc = docManager->OpenFormMDI(metaObject, m_docParent, m_bReadOnly ? wxDOC_READONLY : wxDOC_NEW);
+		foundedDoc = docManager->OpenObjectForm(metaObject, m_docParent, m_bReadOnly ? ibDOC_READONLY : ibDOC_NEW);
 
-	ibValueModulibDocument* moduleDoc = static_cast<ibValueModulibDocument*>(foundedDoc);
+	ibValueModuleDocument* moduleDoc = static_cast<ibValueModuleDocument*>(foundedDoc);
 	if (moduleDoc != nullptr) moduleDoc->SetCurrentLine(lineNumber, setRunLine);
 }
 
@@ -196,7 +195,7 @@ void ibMetadataTree::ActivateItem(const wxTreeItemId& item)
 	if (currObject == nullptr)
 		return;
 
-	OpenFormMDI(currObject);
+	OpenObjectForm(currObject);
 }
 
 ibValueMetaObject* ibMetadataTree::NewItem(const ibClassID& clsid, ibValueMetaObject* parent, bool runObject)
@@ -219,7 +218,7 @@ ibValueMetaObject* ibMetadataTree::CreateItem(bool showValue)
 	if (createdObject != nullptr) {
 
 		ibPropertyObject* oldSelection = objectInspector->GetSelectedObject();
-		if (showValue) { OpenFormMDI(createdObject); }
+		if (showValue) { OpenObjectForm(createdObject); }
 		UpdateToolbar(createdObject,
 			FillItem(createdObject, item, oldSelection == objectInspector->GetSelectedObject(), false));
 	}
@@ -302,7 +301,7 @@ void ibMetadataTree::EditItem()
 	if (!m_currObject)
 		return;
 
-	OpenFormMDI(m_currObject);
+	OpenObjectForm(m_currObject);
 }
 
 void ibMetadataTree::RemoveItem()
@@ -1271,8 +1270,8 @@ void ibMetadataTree::AddInformationRegisterItem(ibValueMetaObject* metaObject, c
 	wxASSERT(metaObjectValue);
 
 	//Список измерений 
-	const wxTreeItemId& hDimentions = AppendGroupItem(hParentID, g_metaDimensionCLSID, objectDimensionsName);
-	for (auto metaDimension : metaObjectValue->GetDimentionArrayObject()) {
+	const wxTreeItemId& hDimensions = AppendGroupItem(hParentID, g_metaDimensionCLSID, objectDimensionsName);
+	for (auto metaDimension : metaObjectValue->GetDimensionArrayObject()) {
 
 		if (metaDimension->IsDeleted())
 			continue;
@@ -1286,7 +1285,7 @@ void ibMetadataTree::AddInformationRegisterItem(ibValueMetaObject* metaObject, c
 		//	&& strName.Find(m_strSearch) < 0)
 		//	continue;
 
-		AppendItem(hDimentions, metaDimension);
+		AppendItem(hDimensions, metaDimension);
 	}
 
 	//Список ресурсов 
@@ -1366,8 +1365,8 @@ void ibMetadataTree::AddAccumulationRegisterItem(ibValueMetaObject* metaObject, 
 	wxASSERT(metaObjectValue);
 
 	//Список измерений 
-	const wxTreeItemId& hDimentions = AppendGroupItem(hParentID, g_metaDimensionCLSID, objectDimensionsName);
-	for (auto metaDimension : metaObjectValue->GetDimentionArrayObject()) {
+	const wxTreeItemId& hDimensions = AppendGroupItem(hParentID, g_metaDimensionCLSID, objectDimensionsName);
+	for (auto metaDimension : metaObjectValue->GetDimensionArrayObject()) {
 
 		if (metaDimension->IsDeleted())
 			continue;
@@ -1381,7 +1380,7 @@ void ibMetadataTree::AddAccumulationRegisterItem(ibValueMetaObject* metaObject, 
 		//	&& strName.Find(m_strSearch) < 0)
 		//	continue;
 
-		AppendItem(hDimentions, metaDimension);
+		AppendItem(hDimensions, metaDimension);
 	}
 
 	//Список ресурсов 
@@ -1515,7 +1514,12 @@ void ibMetadataTree::ActivateTree()
 void ibMetadataTree::ClearTree()
 {
 	for (auto& doc : docManager->GetDocumentsVector()) {
+		// docManager->GetDocumentsVector() now mixes ibMetaDocument
+		// instances (Catalog/Document/Form editors) with plain ibDocument
+		// (AuditLog, Text, Help) after step-4b decoupling. Skip non-meta
+		// docs — they have no metaobject to compare against this tree.
 		const ibMetaDocument* metaDoc = wxDynamicCast(doc, ibMetaDocument);
+		if (metaDoc == nullptr) continue;
 		const ibValueMetaObject* metaObject = metaDoc->GetMetaObject();
 		if (metaObject != nullptr && this == metaObject->GetMetaDataTree()) {
 			doc->DeleteAllViews();
@@ -1972,7 +1976,7 @@ bool ibMetadataTree::Load(ibMetaDataConfigurationBase* metaData)
 {
 	m_metaTreeCtrl->Freeze();
 	ClearTree();
-	m_metaData = metaData ? metaData : ibMetaDataConfiguration::Get();
+	m_metaData = metaData ? metaData : appEnv::ActiveMetaData();
 	FillData(); //Fill all data from metaData
 	m_metaData->SetMetaTree(this);
 	m_metaTreeCtrl->SelectItem(m_treeMETADATA);

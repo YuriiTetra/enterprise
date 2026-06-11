@@ -23,6 +23,7 @@
 //     Submit after that point must not pretend to succeed.
 
 #include "backend/backend.h"
+#include "backend/appDataCtorToken.h"
 #include "backend/databaseLayer/connectionHolder.h"   // ibSingleConnectionHolder base
 #include "session.h"
 #include "sessionPolicy.h"   // unique_ptr<ibSessionPolicy> needs complete type
@@ -149,15 +150,16 @@ class ibDatabaseLayer;
 
 class BACKEND_API ibSessionRegistry {
 public:
-	static ibSessionRegistry& Instance();
+	// No static `Instance()` on the class itself — the registry is a
+	// member of ibApplicationData, owned for the duration of appData's
+	// lifetime. Reach it through `ibApplicationData::GetSessionRegistry()`
+	// (static accessor — returns nullptr pre-appData / post-appData).
+	// This keeps a single coordinator pattern: subsystems do not own
+	// their own global state, they exist only because appData is alive.
 
-	// ---- Legacy direct API ----
-	// Imperative create-and-go shortcuts, retained for in-process callers
-	// that don't go through the Submit-based Connect(req) flow (test
-	// harnesses, low-level wiring). New code should use Connect(req) +
-	// ibSessionTicket so registry policies and the auth state machine fire.
-	ibSession* Create(const wxString& id, ibRunMode runMode);
-	void       Destroy(const wxString& id);
+	// Lookup a live session by its id (GetId()) in m_own. Resolves debugger
+	// per-session routing (Continue / Step / Pause sid) and the web
+	// "session paused?" query. Shared lock on m_ownMutex.
 	ibSession* Find(const wxString& id);
 
 	// Reverse lookup — find the session in m_own whose root module-manager
@@ -166,16 +168,13 @@ public:
 	// which depends on AccessMode + thread-binding state). Returns nullptr
 	// when no live session in m_own owns this mm. Iterates m_own under
 	// m_ownMutex (shared lock).
-	ibSession* FindSessionByRoot(ibValueModuleManagerConfiguration* mm) const;
+	ibSession* FindSessionByRoot(ibValueModuleManagerRuntimeConfiguration* mm) const;
 
 	// Symmetric lookup by main-window pointer. Frame's own m_guiSession
 	// back-link is the cheap path; this is for backend code that has
 	// the frame pointer but no direct field on it (e.g. cross-DLL hooks).
 	// Iterates m_own comparing s->GetFrame() == frame.
 	ibSession* FindSessionByFrame(class ibBackendDocFrame* frame) const;
-
-	std::vector<wxString> List() const;
-	std::size_t              Count() const;
 
 	// Does the registered server session (m_currentServer) currently have
 	// any client attached? Server-shutdown logic uses this to decline
@@ -438,18 +437,19 @@ public:
 	bool IsThreadAlive() const { return m_threadAlive.load(std::memory_order_acquire); }
 	bool IsFatal()       const { return m_fatal.load(std::memory_order_acquire); }
 
-	// maxWorkers — hard cap on the worker pool's OS-thread count. 0
-	// means no pool (single-session GUI modes — designer, enterprise,
-	// daemon). Headless modes (wenterprise-server, future oes-server)
-	// pass a positive value sized by the host based on hardware
-	// concurrency. The pool is allocated here so registry's lifecycle
-	// owns it end-to-end: pool stops before sessions tear down inside
-	// our Stop().
-	explicit ibSessionRegistry(std::size_t maxWorkers = 0);
 	~ibSessionRegistry();
 
 	ibSessionRegistry(const ibSessionRegistry&)            = delete;
 	ibSessionRegistry& operator=(const ibSessionRegistry&) = delete;
+
+	// Construction restricted to ibApplicationData via the
+	// ib::AppDataCtorToken gate — only appData can mint the token.
+	// maxWorkers — hard cap on the worker pool's OS-thread count. 0
+	// means no pool (single-session GUI modes); headless modes pass a
+	// positive value sized by hardware concurrency. Pool is allocated
+	// here so the registry's lifecycle owns it end-to-end.
+	explicit ibSessionRegistry(ib::AppDataCtorToken,
+	                           std::size_t maxWorkers = 0);
 
 private:
 
@@ -540,13 +540,12 @@ public:
 private:
 
 	// Fatal fail-stop. Does NOT return — logs `why` + std::terminate.
-	[[noreturn]] void Die(const wxString& why);
-
-	// --- storage (thread-owned; only ThreadBody touches after Start) ---
-	// Until queue-based Add lands, m_sessions is written by Create/Destroy
-	// under m_mutex — classic Phase 2 layout.
-	mutable std::mutex                                           m_mutex;
-	std::unordered_map<wxString, std::unique_ptr<ibSession>>     m_sessions;
+	// Pre-2026-05-26 this was [[noreturn]] (always std::terminate'd).
+	// Now it returns normally when m_started is false (soft-fail at
+	// startup — producer sees IsFatal()) and only terminates after the
+	// first successful drain. Attribute removed accordingly; callers
+	// must not assume the call never returns.
+	void Die(const wxString& why);
 
 	// --- queue-based ownership (populated by ProcessAdd) ---
 	// shared_ptr — ticket co-owns. When ProcessRemove erases the map
@@ -669,6 +668,17 @@ private:
 	std::atomic<bool>                            m_fatal        { false };
 	wxString                                     m_fatalReason;  // set before m_fatal = true
 
+	// True after ThreadBody completed its first full main-loop iteration
+	// (drain + housekeeping ticks). Before that, Die() takes a soft-fail
+	// path: set m_fatal + m_fatalReason and return, letting the producer
+	// (session->Open / Connect / Authenticate) observe IsFatal() and
+	// surface a readable startup error through the top-level OnRun
+	// try/catch. After m_started is true, ThreadBody is committed —
+	// sys_session reflects state that other processes consume, so a
+	// fatal there cannot leave that state in limbo and Die() routes to
+	// std::terminate as before.
+	std::atomic<bool>                            m_started      { false };
+
 	// "reload" admin signal latch — set by JobCheckSignal, consumed by
 	// ConsumeReloadRequest() on the caller's polling tick.
 	std::atomic<bool>                            m_reloadRequested { false };
@@ -676,6 +686,29 @@ private:
 	// Tick counter — monotonic, incremented once per loop pass. External
 	// watchdogs read this to detect a stuck thread (separate future commit).
 	std::atomic<std::uint64_t>                   m_tickCounter  { 0 };
+
+	// Post-handoff soft landing. After an FB cluster leader handoff the
+	// FB driver self-heals m_writeConn on the next DoRunQuery* — but
+	// during the gap, our heartbeat couldn't UPDATE lastActive on our
+	// own rows. Without protection, the very first JobSweepStale that
+	// fires on the new leader will see lastActive trailing by >
+	// kStaleCutoffSec and DELETE rows whose owners are alive but just
+	// couldn't write. Visible to the user as Active Users blinking
+	// empty. Two coordinated mechanisms:
+	//
+	//   - m_refreshFailedLastTick is set when JobRefreshSnapshot's
+	//     SELECT throws (likely cause: dead leader). Cleared on the
+	//     next successful refresh. The "false→true→false" transition
+	//     is the "we just recovered from a handoff" edge — when we
+	//     observe it we (a) immediately bump our own rows' lastActive
+	//     and (b) extend the sweep-suppression deadline.
+	//
+	//   - m_sweepSuppressUntilMs is a steady-clock-millis deadline.
+	//     JobSweepStale early-returns while now() < deadline. Picked
+	//     generously (5 s) so every cluster member has a chance to
+	//     reconnect and re-heartbeat before any pruning happens.
+	std::atomic<bool>                            m_refreshFailedLastTick { false };
+	std::atomic<std::int64_t>                    m_sweepSuppressUntilMs  { 0 };
 
 	// Priority bins — one deque per ibPriority value. Drain iterates
 	// bins top-down so Urgent evictions always overtake Normal adds in

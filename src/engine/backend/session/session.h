@@ -36,7 +36,7 @@
 #include <wx/string.h>
 
 class ibValueModuleManager;
-class ibValueModuleManagerConfiguration;
+class ibValueModuleManagerRuntimeConfiguration;
 class ibRuntimeModuleDataObject;
 class ibProcUnit;
 
@@ -170,10 +170,10 @@ public:
 
 	// Main UI frame this session owns. Read-only contract for backend
 	// code (CurrentFrame() lookups, script-side CreateNewForm, etc.).
-	// Default null — frameless sessions (daemon, codeRunner, classChecker,
+	// Default null — frameless sessions (daemon, codeRunner,
 	// future compute server, WebServer technical row) have no UI and never
 	// override. Sessions that own a frame (ibGUISession with
-	// ibFrontendDocMDIFrame, ibWebClientSession with ibWebFrame) carry
+	// ibFrontendMainFrame, ibWebClientSession with ibWebFrame) carry
 	// their own typed storage and override GetFrame to expose it.
 	virtual ibBackendDocFrame* GetFrame() const { return nullptr; }
 
@@ -205,7 +205,18 @@ public:
 	// Non-GUI sessions inherit the default OnShowAuthenticate (false) so
 	// the fallback no-ops and Authenticate reports the original failure;
 	// GUI app OnInit terminates the process in that case.
-	bool Open(const wxString& user, const wxString& password);
+	//
+	// Tri-state result. Callers used to treat `bool == false` as "show
+	// error", which surfaced "Authentication failed" even when the user
+	// just clicked Cancel on the login dialog. Distinguishing the two
+	// lets the GUI app exit silently on cancel and only message on a
+	// real auth failure.
+	enum class OpenResult {
+		Authenticated,   // creds accepted (silent or via dialog)
+		Failed,          // creds rejected — show "Authentication failed"
+		Cancelled,       // user cancelled the interactive dialog — silent exit
+	};
+	OpenResult Open(const wxString& user, const wxString& password);
 
 	// Interactive prompt event — fires only when silent Attach fails.
 	// Overridden by ibGUISession (shared for designer + enterprise; shows
@@ -231,7 +242,20 @@ public:
 	// the registry's NotifyAuthenticated phase right after Open() succeeds;
 	// stays nullptr for sessions that never run scripts (Designer,
 	// WebServer technical session, Launcher).
-	ibValueModuleManagerConfiguration* GetManagerModule() const;
+	ibValueModuleManagerRuntimeConfiguration* GetManagerModule() const;
+
+	// The module manager whose context (Manager / Catalogs / Documents / globals)
+	// an object/record/module compiled against `metaData` should parent to. One
+	// seam, two roads: Designer returns the lightweight designer manager held in
+	// `metaData`'s compile cache (no runtime root exists in the Designer); runtime
+	// returns this session's root mm. Callers that previously wrote
+	// `session->GetManagerModule()` + a DesignerMode branch use this instead.
+	// Out-of-line (session.cpp) — needs the complete designer type.
+	class ibValueModuleManager* GetEditModuleManager(const class ibMetaData* metaData) const;
+
+	// Convenience: resolve against ibSession::Current() (the common call shape at
+	// InitializeObject sites). Null-safe when there's no current session.
+	static class ibValueModuleManager* EditModuleManagerFor(const class ibMetaData* metaData);
 
 	// Create the session's root module manager. The configuration's
 	// commonMetaObject is taken directly from metaData (typed accessor —
@@ -240,7 +264,7 @@ public:
 	// ibValuePtr releases its ref (delete-if-last) after running
 	// DestroyMainModule on it. CompileRoot is separate so callers can
 	// register common modules in metadata's storage between the two.
-	ibValueModuleManagerConfiguration* CreateRoot(class ibMetaDataConfigurationBase* metaData);
+	ibValueModuleManagerRuntimeConfiguration* CreateRoot(class ibMetaDataConfigurationBase* metaData);
 
 	// Explicit close — fires OnDestroySession on the calling thread
 	// (main-thread wx frame teardown for GUI sessions) and submits
@@ -498,8 +522,7 @@ public:
 	// session is created.
 	//
 	//   Single — the process runs exactly one session for its entire life
-	//            (designer.exe, enterprise.exe, daemon.exe, codeRunner.exe,
-	//            classChecker.exe). Current() returns the lone session
+	//            (designer.exe, enterprise.exe, daemon.exe, codeRunner.exe). Current() returns the lone session
 	//            regardless of the calling thread; bindings are recorded
 	//            for diagnostics but lookup ignores them.
 	//
@@ -555,18 +578,6 @@ public:
 	// Null when no scope is active or when the scoped session is
 	// frameless (web-server, headless, codeRunner).
 	static ibBackendDocFrame* CurrentFrame();
-
-	// Convenience: debug runContext of the currently-scoped session.
-	// On a debug-server worker thread Current() redirects to the
-	// session parked at a breakpoint; on a script worker thread it's
-	// the session that hit the breakpoint and is now in DoDebugLoop.
-	// Either way this returns that session's per-session debug
-	// runContext (set by DoDebugLoop). Used by debug command handlers
-	// (Eval, ExpandExpression, EvalToolTip, EvalAutocomplete) instead
-	// of the legacy process-level ibDebuggerServer::m_runContext slot.
-	// Null when no session is parked or when the session has no debug
-	// state attached.
-	static ibRunContext* CurrentRunContext();
 
 	// Convenience: whether the currently-scoped session has been
 	// force-exited. Returns false when no session is bound. Drop-in
@@ -730,7 +741,7 @@ private:
 	// project convention for ibValue-derived types). Nested descriptors
 	// (common modules, object instances, forms) parent up through
 	// m_parent chain. See project_runtime_facade_plan.md.
-	ibValuePtr<ibValueModuleManagerConfiguration> m_root;
+	ibValuePtr<ibValueModuleManagerRuntimeConfiguration> m_root;
 
 	// Lambda executor — see GetLambdaRuntime() for semantics. Allocated
 	// in CreateRoot; SetParent(m_root's procUnit) is wired lazily on

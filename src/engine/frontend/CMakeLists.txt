@@ -87,7 +87,6 @@ set(WFRONTEND_SOURCES
 
     # Doc/view
     ${CMAKE_CURRENT_SOURCE_DIR}/docView/docView.cpp
-    ${CMAKE_CURRENT_SOURCE_DIR}/docView/docViewCmd.cpp
 
     # Controls — only files with ibFrontendWindow* signatures. The
     # excluded ctrl/*.cpp files still declare Create/OnCreated with

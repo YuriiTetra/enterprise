@@ -11,11 +11,47 @@
 
 #include "firebirdPreparedStatement.h"
 #include "firebirdResultSet.h"
+#include "firebirdLeaderMode.h"
+#include "firebirdLocalServer.h"
+#include "firebirdMaintenanceScheduler.h"
 
 #include <wx/file.h>
 #include <wx/stdpaths.h>
 #include <wx/tokenzr.h>
 #include <wx/regex.h>
+
+// Firebird SQL dialect — owned by the driver. Static holds the definition (a
+// test reads it without constructing the driver); virtual GetDialect() exposes
+// it to L2. No central factory, no type-switch.
+const ibDialectDictionary& ibDatabaseLayerFirebird::Dialect()
+{
+	static const ibDialectDictionary s_dialect = [] {
+		ibDialectDictionary d;
+		d.m_paramStyle  = ibParamStyle::QuestionMark;
+		d.m_pagination  = ibPagination::FirstSkip;    // SELECT FIRST n SKIP m
+		d.m_boolForm    = ibBoolForm::Smallint;       // no native boolean pre-FB3
+		// UPDATE OR INSERT … MATCHING (pk) — no separate update body.
+		d.m_upsertTemplate   = wxT("UPDATE OR INSERT INTO {table} ({columns}) VALUES ({values}) MATCHING ({keys})");
+		d.m_upsertUpdateItem = wxEmptyString;
+		d.m_features.m_window = true;                 // FB3+
+		d.m_features.m_rollup = true;                 // GROUP BY ROLLUP(...) — FB5 (vendored: security5.fdb)
+		// type map
+		d.m_typeBoolean       = wxT("SMALLINT");
+		d.m_typeDate          = wxT("TIMESTAMP");
+		d.m_typeBlob          = wxT("BLOB");
+		d.m_typeGuid          = wxT("CHAR(36)");
+		// NUMERIC holds a wider range than DECIMAL (INT128-backed) — matches ibNumber.
+		d.m_typeNumberPattern = wxT("NUMERIC(%d,%d)");
+		d.m_rowLockSuffix     = wxT(" WITH LOCK");     // FB pessimistic row lock (not FOR UPDATE)
+		return d;
+	}();
+	return s_dialect;
+}
+
+const ibDialectDictionary& ibDatabaseLayerFirebird::GetDialect() const
+{
+	return Dialect();
+}
 
 // ctor()
 ibDatabaseLayerFirebird::ibDatabaseLayerFirebird()
@@ -221,11 +257,33 @@ bool ibDatabaseLayerFirebird::Open()
 	//wxCSConv conv(wxT("UTF-8"));
 	//SetEncoding(&conv);
 
-	// Combine the server and databsae path strings to pass into the isc_attach_databse function
+	// Leader-election orchestrator hook. UNC / SMB paths route
+	// through `ibFirebirdLeaderMode::InitForDatabase` which decides
+	// whether this process is leader (acquired the SMB byte-range
+	// lock and hosts the database locally via a child `firebird.exe`
+	// TCP listener) or follower (someone else is leader; attach to
+	// them over TCP). Local paths bypass the orchestrator and
+	// always go embedded — same behaviour as before leader-mode
+	// landed.
 	wxString strDatabaseUrl;
-
 	if (m_strServer.IsEmpty()) {
-		strDatabaseUrl = m_strDatabase; // Embedded database, just supply the file name
+		const auto lm = ibFirebirdLeaderMode::InitForDatabase(m_strDatabase);
+		if (!lm.ok) {
+			SetErrorCode(DATABASE_LAYER_ERROR_LOADING_LIBRARY);
+			SetErrorMessage(lm.errorMessage);
+			ThrowDatabaseException();
+			return false;
+		}
+		if (lm.role == ibFirebirdLeaderMode::Role::Standalone) {
+			// No lease — normal embedded attach by file path.
+			strDatabaseUrl = m_strDatabase;
+		} else {
+			// Leader or follower — orchestrator hands back the right
+			// attach URL (either `inet://localhost:<port>/<path>` for
+			// the leader's own embedded-via-TCP path, or
+			// `inet://leader-host:<port>/<path>` for followers).
+			strDatabaseUrl = lm.connectUrl;
+		}
 	}
 	else {
 		strDatabaseUrl = m_strServer + wxT(":") + m_strDatabase;
@@ -292,9 +350,99 @@ bool ibDatabaseLayerFirebird::Open()
 		dpbBuffer.push_back(sizeof(sTimeZone) - 1);
 		dpbBuffer.append(sTimeZone);
 
+		// sweep_interval — how many transactions between automatic
+		// sweep passes (background MVCC garbage collection that frees
+		// pages occupied by dead row versions). FB default is 20000;
+		// we tighten to 5000 so active-OLTP databases don't accumulate
+		// as much dead-version bloat before sweep reclaims it. Sweep
+		// runs in the background on the connection that triggers it
+		// (typical impact: brief CPU spike, no DML pause). Encoded
+		// as 4-byte little-endian per legacy DPB.
+		{
+			const uint32_t sweepInterval = 5000;
+			dpbBuffer.push_back(isc_dpb_sweep_interval);
+			dpbBuffer.push_back(4);
+			dpbBuffer.push_back((char)(sweepInterval       & 0xFF));
+			dpbBuffer.push_back((char)((sweepInterval >> 8 ) & 0xFF));
+			dpbBuffer.push_back((char)((sweepInterval >> 16) & 0xFF));
+			dpbBuffer.push_back((char)((sweepInterval >> 24) & 0xFF));
+		}
+
+		// num_buffers — per-attachment page-cache size in pages. Default
+		// DefaultDbCachePages = 2048 (32 MB at 16K pages) is set in
+		// firebird.conf; we set it via DPB too so the driver owns the
+		// policy and firebird.conf becomes a fallback for engine-level
+		// settings only (ServerMode = Classic for RDP coordination,
+		// which has no DPB equivalent). Encoded as 4-byte little-endian
+		// integer per the dpb_num_buffers convention.
+		{
+			const uint32_t numBuffers = 2048;
+			dpbBuffer.push_back(isc_dpb_num_buffers);
+			dpbBuffer.push_back(4);
+			dpbBuffer.push_back((char)(numBuffers       & 0xFF));
+			dpbBuffer.push_back((char)((numBuffers >> 8 ) & 0xFF));
+			dpbBuffer.push_back((char)((numBuffers >> 16) & 0xFF));
+			dpbBuffer.push_back((char)((numBuffers >> 24) & 0xFF));
+		}
+
+		// parallel_workers (FB 5) — per-attachment cap for the
+		// operations FB 5 actually parallelises. ParallelWorkers in
+		// firebird.conf is the global ceiling; this DPB value is the
+		// upper bound for THIS connection (clamped to ≤
+		// MaxParallelWorkers from conf). Encoded as 4-byte
+		// little-endian integer.
+		//
+		// What FB 5 parallelises with this knob (the things OES
+		// actually triggers):
+		//   - Sweep — ibFirebirdMaintenance::RunSweep; faster finish
+		//     ⇒ smaller window of page-cache thrash.
+		//   - Backup / Restore — RunBackupRestoreCycle in the off-
+		//     hours maintenance window.
+		//   - CREATE INDEX / ALTER INDEX ACTIVE / index rebuild —
+		//     designer deploys, data-import flows.
+		//
+		// What it does NOT parallelise in FB 5: regular SELECT (no
+		// parallel scan yet — planned for FB 6), DML, OLTP in
+		// general. OES's per-form OLTP-light query mix sees no
+		// per-query latency change; the win is entirely in those
+		// backend-task durations on the leader.
+		//
+		// Our vendored consts_pub.h is FB-4-era and stops at
+		// isc_dpb_decfloat_traps (95); the parallel_workers tag was
+		// added in FB 5. We're running against the FB 5.0.5 runtime,
+		// so define it locally with the upstream value. The previous
+		// `#ifdef isc_dpb_parallel_workers` guard silently skipped
+		// the whole block because the symbol wasn't defined, leaving
+		// per-attachment parallelism off. On a future header bump,
+		// the duplicate `#define` will surface as a clear "macro
+		// redefined" diagnostic at this site.
+#ifndef isc_dpb_parallel_workers
+#define isc_dpb_parallel_workers 100
+#endif
+		{
+			const uint32_t parallelWorkers = 2;
+			dpbBuffer.push_back((char)isc_dpb_parallel_workers);
+			dpbBuffer.push_back(4);
+			dpbBuffer.push_back((char)(parallelWorkers       & 0xFF));
+			dpbBuffer.push_back((char)((parallelWorkers >> 8 ) & 0xFF));
+			dpbBuffer.push_back((char)((parallelWorkers >> 16) & 0xFF));
+			dpbBuffer.push_back((char)((parallelWorkers >> 24) & 0xFF));
+		}
+
+		// isc_dpb_utf8_filename is a FLAG (boolean) DPB tag — it tells
+		// the engine "the database filename in the attach call is
+		// encoded in UTF-8". It carries NO value (length byte = 0).
+		//
+		// Previously this stuffed the full URL as the tag's value,
+		// which malformed the DPB. Non-UNC paths apparently survived
+		// (engine ignored / skipped the bogus value), but UNC paths
+		// (`\\host\share\db.fdb`) tripped a CreateFile attempt against
+		// the bogus data and returned isc_io_error (335544344) before
+		// the real attach completed. Server-side attach still appeared
+		// to succeed (lock files were created in ProgramData), but
+		// fbclient never saw a successful response.
 		dpbBuffer.push_back(isc_dpb_utf8_filename);
-		dpbBuffer.push_back(urlLength);
-		dpbBuffer.append(urlBuffer);
+		dpbBuffer.push_back(0);
 
 		if (m_strUser.length() > 0)
 		{
@@ -336,7 +484,16 @@ bool ibDatabaseLayerFirebird::Open()
 
 	if (m_strServer.IsEmpty())
 	{
-		if (!wxFile::Exists(strDatabaseUrl)){
+		// Check existence by *file path*, not by `strDatabaseUrl`.
+		// In leader-mode the URL is a TCP form like
+		// `inet://localhost:<port>/\\host\share\db.fdb` — wxFile::Exists
+		// against that always returns false, which used to silently
+		// route us into the CREATE branch even when the DB already
+		// existed on the share. FB then tried to CREATE over the URL
+		// and surfaced isc_io_error (335544344). The actual file path
+		// (m_strDatabase) is what should drive the create-vs-attach
+		// decision.
+		if (!wxFile::Exists(m_strDatabase)){
 
 			wxFileName fileDatabase(m_strDatabase);
 			// Mkdir(..., wxPATH_MKDIR_FULL) is the recursive variant —
@@ -376,12 +533,47 @@ bool ibDatabaseLayerFirebird::Open()
 		return false;
 	}
 
+	// Cache the URL the new isc_db_handle was attached against so
+	// ReconnectIfLeaderChanged can later detect leader handoff and
+	// reattach. Empty m_strServer = local/leader-mode path; remote
+	// (`server:db`) bypasses leader-mode entirely.
+	m_currentConnectUrl = strDatabaseUrl;
+
+	wxLogDebug(wxT("ibDatabaseLayerFirebird: attached to %s"),
+	           strDatabaseUrl);
+
+	// Spin up the maintenance scheduler — ONLY for Standalone single-
+	// process embedded. Leader-mode (our own spawned firebird.exe
+	// holds the .fdb via TCP) cannot do gbak BR-cycle's atomic SWAP:
+	// Windows rename fails with sharing violation, POSIX silently
+	// re-points the inode leaving the running server on a stale
+	// file. Followers must not touch the shared DB at all. Remote
+	// `server:db` mode delegates maintenance to whoever owns the
+	// remote server.
+	if (m_strServer.IsEmpty()
+	 && ibFirebirdLeaderMode::CurrentRole() == ibFirebirdLeaderMode::Role::Standalone) {
+		ibFirebirdMaintenance::ServiceConnection conn;
+		conn.username = m_strUser;
+		conn.password = m_strPassword;
+		// conn.server stays empty → service_mgr on local host
+		ibFirebirdMaintenanceScheduler::Start(m_pInterface, m_strDatabase, conn);
+	}
+
 	return true;
 }
 
-// close database  
+// close database
 bool ibDatabaseLayerFirebird::Close()
 {
+	// NOTE: maintenance scheduler is intentionally NOT stopped here.
+	// ibDatabaseLayerFirebird instances are cloned per pool slot, and
+	// the pool open/closes connections constantly — stopping the
+	// scheduler on every Close would kill it the first time any
+	// connection returns to the pool. Scheduler is a process-wide
+	// singleton tied to leader-mode lifetime (Started lazily on first
+	// Open in leader/standalone role; stopped via atexit hook
+	// registered in MaintenanceScheduler::Start itself).
+
 	CloseResultSets();
 	CloseStatements();
 
@@ -421,6 +613,13 @@ bool ibDatabaseLayerFirebird::IsOpen()
 void ibDatabaseLayerFirebird::DoBeginTransaction(const ibTxOptions& opts)
 {
 	ResetErrorCodes();
+
+	// Single reconnect-on-leader-handoff checkpoint per TX boundary.
+	// Reattach to the current leader URL if it has changed since our
+	// last Open. Cheap on the hot path (URL string compare) when no
+	// handoff happened. If reconnect fires, m_pDatabase is the fresh
+	// handle below.
+	ReconnectIfLeaderChanged();
 
 	if (!m_pDatabase)
 		return;
@@ -543,7 +742,7 @@ bool ibDatabaseLayerFirebird::HoldRowLocks(const wxString& tableName,
 	// would interleave in unhelpful ways.
 	if (m_rowLocksHeld) {
 		try { Commit(); } catch (...) {
-			try { RollBack(); } catch (...) {}
+			try { RollBack(); } catch (...) { /* swallowed: rollback after commit fail — TX state already lost, nothing else to do */ }
 		}
 		m_rowLocksHeld = false;
 	}
@@ -568,7 +767,7 @@ bool ibDatabaseLayerFirebird::HoldRowLocks(const wxString& tableName,
 
 	ibPreparedStatement* stmt = DoPrepareStatement(sql);
 	if (!stmt) {
-		try { RollBack(); } catch (...) {}
+		try { RollBack(); } catch (...) { /* swallowed: rollback on prepare-fail path, TX may not even have started */ }
 		return false;
 	}
 
@@ -592,7 +791,7 @@ bool ibDatabaseLayerFirebird::HoldRowLocks(const wxString& tableName,
 	CloseStatement(stmt);
 
 	if (!sqlOk || lockedCount != int(pkValues.size())) {
-		try { RollBack(); } catch (...) {}
+		try { RollBack(); } catch (...) { /* swallowed: rollback on partial-lock-acquisition fail; caller treats false as "no lock" */ }
 		return false;
 	}
 
@@ -610,7 +809,7 @@ void ibDatabaseLayerFirebird::ReleaseRowLocks()
 		// Commit failed — TX may still be open and holding locks.
 		// Try a rollback so the cluster coordination row isn't left
 		// pinned by a dead-but-uncommitted TX of ours.
-		try { RollBack(); } catch (...) {}
+		try { RollBack(); } catch (...) { /* swallowed: rollback after commit fail — TX state already lost, nothing left to do */ }
 	}
 	m_rowLocksHeld = false;
 }
@@ -659,7 +858,7 @@ bool ibDatabaseLayerFirebird::TryProbeRowLock(const wxString& tableName,
 	}
 
 	// Always release — probe must never keep a lock outliving the call.
-	try { RollBack(); } catch (...) {}
+	try { RollBack(); } catch (...) { /* swallowed: TryProbeRowLock always rolls back so no lock survives — failure here means lock is gone anyway */ }
 	return gotLock;
 }
 
@@ -667,6 +866,13 @@ bool ibDatabaseLayerFirebird::TryProbeRowLock(const wxString& tableName,
 int ibDatabaseLayerFirebird::DoRunQuery(const wxString& strQuery, bool bParseQuery)
 {
 	ResetErrorCodes();
+	// Proactive leader-handoff check: any caller (TX-bound or direct
+	// auto-commit) gets a self-healed connection before the query is
+	// dispatched. Hot path is a single cached-string compare against
+	// the leader-mode URL — no-op when nothing changed. If a handoff
+	// happened mid-TX, this surfaces as an exception, which is exactly
+	// what we want — caller must rollback and retry. See header.
+	ReconnectIfLeaderChanged();
 	if (m_pDatabase != 0)
 	{
 		wxCharBuffer sqlDebugBuffer = ConvertToUnicodeStream(strQuery);
@@ -762,10 +968,13 @@ int ibDatabaseLayerFirebird::DoRunQuery(const wxString& strQuery, bool bParseQue
 ibDatabaseResultSet* ibDatabaseLayerFirebird::DoRunQueryWithResults(const wxString& strQuery)
 {
 	ResetErrorCodes();
+	// Self-heal after leader handoff before the SELECT — see
+	// DoRunQuery for the rationale. Cheap when no handoff happened.
+	ReconnectIfLeaderChanged();
 	if (m_pDatabase != 0)
 	{
 		wxCharBuffer sqlDebugBuffer = ConvertToUnicodeStream(strQuery);
-#if DEBUG 
+#if DEBUG
 		wxLogDebug(wxT("Running query: \"%s\""), (const char*)sqlDebugBuffer);
 #endif
 		wxArrayString QueryArray = ParseQueries(strQuery);
@@ -934,19 +1143,11 @@ ibDatabaseResultSet* ibDatabaseLayerFirebird::DoRunQueryWithResults(const wxStri
 				//  so that we can ignore the error messages
 				m_pInterface->GetIscRollbackTransaction()(*(ISC_STATUS_ARRAY*)m_pStatus, &pQueryTransaction);
 
-				// Wrap the result set deletion in try/catch block if using exceptions.
-				//We want to make sure the original error gets to the user
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-				try
-				{
-#endif
-					delete pResultSet;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-				}
-				catch (ibDatabaseLayerException& e)
-				{
-				}
-#endif
+				// Swallow any throw from the result-set dtor — we are
+				// already on the error path; the original isc_dsql_*
+				// failure is what we want the caller to see, not a
+				// secondary cleanup exception.
+				try { delete pResultSet; } catch (const ibBackendException&) {}
 
 				ThrowDatabaseException();
 			}
@@ -961,19 +1162,10 @@ ibDatabaseResultSet* ibDatabaseLayerFirebird::DoRunQueryWithResults(const wxStri
 				//  so that we can ignore the error messages
 				m_pInterface->GetIscRollbackTransaction()(*(ISC_STATUS_ARRAY*)m_pStatus, &pQueryTransaction);
 
-				// Wrap the result set deletion in try/catch block if using exceptions.
-				//  We want to make sure the isc_dsql_execute error gets to the user
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-				try
-				{
-#endif
-					delete pResultSet;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-				}
-				catch (ibDatabaseLayerException& e)
-				{
-				}
-#endif
+				// Swallow any throw from the result-set dtor — the
+				// isc_dsql_execute failure above is the user-visible
+				// error; a secondary cleanup exception would mask it.
+				try { delete pResultSet; } catch (const ibBackendException&) {}
 
 				ThrowDatabaseException();
 				return NULL;
@@ -997,6 +1189,10 @@ ibDatabaseResultSet* ibDatabaseLayerFirebird::DoRunQueryWithResults(const wxStri
 ibPreparedStatement* ibDatabaseLayerFirebird::DoPrepareStatement(const wxString& strQuery)
 {
 	ResetErrorCodes();
+	// Self-heal after leader handoff so the statement is built against
+	// the new firebird.exe handle, not the dead one — see DoRunQuery
+	// for the rationale.
+	ReconnectIfLeaderChanged();
 
 	ibPreparedStatementFirebird* pStatement = ibPreparedStatementFirebird::CreateStatement(m_pInterface, m_pDatabase, m_pTransaction, strQuery, GetEncoding());
 	if (pStatement && (pStatement->GetErrorCode() != DATABASE_LAYER_OK))
@@ -1021,11 +1217,7 @@ bool ibDatabaseLayerFirebird::TableExists(const wxString& table)
 	//  in case of an error
 	ibPreparedStatement* pStatement = NULL;
 	ibDatabaseResultSet* pResult = NULL;
-
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString tableUpperCase = table.Upper();
 		wxString query = wxT("SELECT COUNT(*) FROM RDB$RELATIONS WHERE RDB$SYSTEM_FLAG=0 AND RDB$VIEW_BLR IS NULL AND RDB$RELATION_NAME=?;");
 		pStatement = DoPrepareStatement(query);
@@ -1044,10 +1236,7 @@ bool ibDatabaseLayerFirebird::TableExists(const wxString& table)
 				}
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != NULL)
 		{
 			CloseResultSet(pResult);
@@ -1059,25 +1248,23 @@ bool ibDatabaseLayerFirebird::TableExists(const wxString& table)
 			CloseStatement(pStatement);
 			pStatement = NULL;
 		}
-
-		throw e;
-		}
-#endif
-
-	if (pResult != NULL)
-	{
-		CloseResultSet(pResult);
-		pResult = NULL;
 	}
-
-	if (pStatement != NULL)
-	{
-		CloseStatement(pStatement);
-		pStatement = NULL;
+	catch (const ibBackendException&) {
+		// Close any still-open resources before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != NULL) {
+			CloseResultSet(pResult);
+			pResult = NULL;
+		}
+		if (pStatement != NULL) {
+			CloseStatement(pStatement);
+			pStatement = NULL;
+		}
+		throw;
 	}
 
 	return bReturn;
-	}
+}
 
 bool ibDatabaseLayerFirebird::ViewExists(const wxString& view)
 {
@@ -1087,11 +1274,7 @@ bool ibDatabaseLayerFirebird::ViewExists(const wxString& view)
 	//  in case of an error
 	ibPreparedStatement* pStatement = NULL;
 	ibDatabaseResultSet* pResult = NULL;
-
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString viewUpperCase = view.Upper();
 		wxString query = wxT("SELECT COUNT(*) FROM RDB$RELATIONS WHERE RDB$SYSTEM_FLAG=0 AND RDB$VIEW_BLR IS NOT NULL AND RDB$RELATION_NAME=?;");
 		pStatement = DoPrepareStatement(query);
@@ -1110,10 +1293,7 @@ bool ibDatabaseLayerFirebird::ViewExists(const wxString& view)
 				}
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != NULL)
 		{
 			CloseResultSet(pResult);
@@ -1125,35 +1305,30 @@ bool ibDatabaseLayerFirebird::ViewExists(const wxString& view)
 			CloseStatement(pStatement);
 			pStatement = NULL;
 		}
-
-		throw e;
-		}
-#endif
-
-	if (pResult != NULL)
-	{
-		CloseResultSet(pResult);
-		pResult = NULL;
 	}
-
-	if (pStatement != NULL)
-	{
-		CloseStatement(pStatement);
-		pStatement = NULL;
+	catch (const ibBackendException&) {
+		// Close any still-open resources before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != NULL) {
+			CloseResultSet(pResult);
+			pResult = NULL;
+		}
+		if (pStatement != NULL) {
+			CloseStatement(pStatement);
+			pStatement = NULL;
+		}
+		throw;
 	}
 
 	return bReturn;
-	}
+}
 
 wxArrayString ibDatabaseLayerFirebird::GetTables()
 {
 	wxArrayString returnArray;
 
 	ibDatabaseResultSet* pResult = NULL;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString query = wxT("SELECT RDB$RELATION_NAME FROM RDB$RELATIONS WHERE RDB$SYSTEM_FLAG=0 AND RDB$VIEW_BLR IS NULL");
 		pResult = ExecuteQuery(query);
 
@@ -1161,38 +1336,32 @@ wxArrayString ibDatabaseLayerFirebird::GetTables()
 		{
 			returnArray.Add(pResult->GetResultString(1).Trim());
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != NULL)
 		{
 			CloseResultSet(pResult);
 			pResult = NULL;
 		}
-
-		throw e;
+	}
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != NULL) {
+			CloseResultSet(pResult);
+			pResult = NULL;
 		}
-#endif
-
-	if (pResult != NULL)
-	{
-		CloseResultSet(pResult);
-		pResult = NULL;
+		throw;
 	}
 
 	return returnArray;
-	}
+}
 
 wxArrayString ibDatabaseLayerFirebird::GetViews()
 {
 	wxArrayString returnArray;
 
 	ibDatabaseResultSet* pResult = NULL;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString query = wxT("SELECT RDB$RELATION_NAME FROM RDB$RELATIONS WHERE RDB$SYSTEM_FLAG=0 AND RDB$VIEW_BLR IS NOT NULL");
 		pResult = ExecuteQuery(query);
 
@@ -1200,28 +1369,25 @@ wxArrayString ibDatabaseLayerFirebird::GetViews()
 		{
 			returnArray.Add(pResult->GetResultString(1).Trim());
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != NULL)
 		{
 			CloseResultSet(pResult);
 			pResult = NULL;
 		}
-
-		throw e;
+	}
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != NULL) {
+			CloseResultSet(pResult);
+			pResult = NULL;
 		}
-#endif
-
-	if (pResult != NULL)
-	{
-		CloseResultSet(pResult);
-		pResult = NULL;
+		throw;
 	}
 
 	return returnArray;
-	}
+}
 
 wxArrayString ibDatabaseLayerFirebird::GetColumns(const wxString& table)
 {
@@ -1231,11 +1397,7 @@ wxArrayString ibDatabaseLayerFirebird::GetColumns(const wxString& table)
 	//  in case of an error
 	ibPreparedStatement* pStatement = NULL;
 	ibDatabaseResultSet* pResult = NULL;
-
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString tableUpperCase = table.Upper();
 		wxString query = wxT("SELECT RDB$FIELD_NAME FROM RDB$RELATION_FIELDS WHERE RDB$RELATION_NAME=?;");
 		pStatement = DoPrepareStatement(query);
@@ -1251,10 +1413,8 @@ wxArrayString ibDatabaseLayerFirebird::GetColumns(const wxString& table)
 				}
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
+
 		if (pResult != NULL)
 		{
 			CloseResultSet(pResult);
@@ -1266,31 +1426,88 @@ wxArrayString ibDatabaseLayerFirebird::GetColumns(const wxString& table)
 			CloseStatement(pStatement);
 			pStatement = NULL;
 		}
-
-		throw e;
-		}
-#endif
-
-	if (pResult != NULL)
-	{
-		CloseResultSet(pResult);
-		pResult = NULL;
 	}
-
-	if (pStatement != NULL)
-	{
-		CloseStatement(pStatement);
-		pStatement = NULL;
+	catch (const ibBackendException&) {
+		// Close any still-open resources before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != NULL) {
+			CloseResultSet(pResult);
+			pResult = NULL;
+		}
+		if (pStatement != NULL) {
+			CloseStatement(pStatement);
+			pStatement = NULL;
+		}
+		throw;
 	}
 
 	return returnArray;
-	}
+}
 
 int ibDatabaseLayerFirebird::TranslateErrorCode(int nCode)
 {
 	// Ultimately, this will probably be a map of Firebird database error code values to ibDatabaseLayer values
 	// For now though, we'll just return the original error code
 	return nCode;
+}
+
+ibBackendDatabaseException::Kind ibDatabaseLayerFirebird::ClassifyDatabaseError(int nativeCode) const
+{
+	// Firebird stashes the primary `isc_*` gds code into m_nErrorCode
+	// via SetErrorCode(...) at every error path. The full status
+	// vector (isc_status[]) carries detail, but the primary code is
+	// what callers branch on.
+	//
+	// Symbolic names from interbase/ibase.h — we use the raw integer
+	// values to avoid pulling the FB headers into this classifier.
+	// They are part of FB's stable ABI (isc_*. macros are in iberror.h
+	// and don't change between minor versions).
+	using Kind = ibBackendDatabaseException::Kind;
+
+	switch (nativeCode) {
+		// --- ConnectionLost ---
+		case 335544721: // isc_network_error
+		case 335544722: // isc_net_connect_err
+		case 335544723: // isc_net_connect_listen_err
+		case 335544724: // isc_net_event_connect_err
+		case 335544725: // isc_net_event_listen_err
+		case 335544726: // isc_net_read_err
+		case 335544727: // isc_net_write_err
+		case 335544741: // isc_server_misconfigured
+		case 335544856: // isc_att_shutdown
+			return Kind::ConnectionLost;
+
+		// --- Deadlock / lock conflict ---
+		case 335544336: // isc_deadlock
+		case 335544345: // isc_lock_conflict
+		case 335544510: // isc_lock_timeout — but FB labels this as a
+		                // *conflict* (the wait actually expired); we
+		                // surface as Timeout below.
+			return Kind::Deadlock;
+
+		// --- Timeout ---
+		case 335544855: // isc_cancelled (statement cancelled, often via timeout)
+			return Kind::Timeout;
+
+		// --- Constraint violations ---
+		case 335544349: // isc_no_dup
+		case 335544466: // isc_foreign_key
+		case 335544347: // isc_not_valid (CHECK violation)
+		case 335544665: // isc_unique_key_violation
+		case 335544558: // isc_check_constraint
+			return Kind::Constraint;
+
+		// --- Syntax / DSQL parse errors ---
+		case 335544343: // isc_dsql_error
+		case 336397208: // isc_dsql_command_err
+		case 336397210: // isc_dsql_token_unk_err
+		case 336003075: // isc_dsql_relation_err
+		case 336003085: // isc_dsql_field_err
+			return Kind::Syntax;
+
+		default:
+			return Kind::Unknown;
+	}
 }
 
 //wxString ibDatabaseLayerFirebird::TranslateErrorCodeToString(ibInterfaceFirebird* pInterface, int nCode, ISC_STATUS_ARRAY status)
@@ -1339,6 +1556,90 @@ void ibDatabaseLayerFirebird::InterpretErrorCodes()
 	}
 }
 
+bool ibDatabaseLayerFirebird::ReconnectIfStale()
+{
+	// Public hook on the base — forwards to our private leader-mode
+	// reconnect logic. Callers from outside the FB driver use this
+	// generic API; the FB-specific routing stays encapsulated.
+	return ReconnectIfLeaderChanged();
+}
+
+bool ibDatabaseLayerFirebird::ReconnectIfLeaderChanged()
+{
+	// Remote `server:db` mode has no leader-mode involvement — caller
+	// configured a fixed FB server, not a shared-file path through the
+	// orchestrator. Skip.
+	if (!m_strServer.IsEmpty())
+		return false;
+
+	const wxString currentLeaderUrl = ibFirebirdLeaderMode::CurrentConnectUrl();
+
+	// Empty = leader-mode never initialised (no UNC path → standalone
+	// path) or shut down. Nothing to reconnect against.
+	if (currentLeaderUrl.IsEmpty())
+		return false;
+
+	// URL still matches cache = no handoff happened since our last
+	// attach. Hot path; this is the common case on every
+	// BeginTransaction call.
+	if (currentLeaderUrl == m_currentConnectUrl)
+		return false;
+
+	// Hard fail if caller is mid-transaction. Reconnect tears down
+	// the FB handle; any uncommitted work on the old leader is
+	// lost. Surfacing this as a clean exception is much safer than
+	// silently re-pointing the handle and letting the caller commit
+	// a half-statement-tx onto the new leader. Caller is expected
+	// to catch, rollback their logical TX, and retry from scratch.
+	if (m_pTransaction != 0) {
+		wxLogError(wxT("ibDatabaseLayerFirebird: leader handoff during ")
+		           wxT("active transaction (was %s, now %s) — caller must ")
+		           wxT("rollback and retry"),
+		           m_currentConnectUrl, currentLeaderUrl);
+		SetErrorCode(DATABASE_LAYER_ERROR_LOADING_LIBRARY);
+		SetErrorMessage(wxT("Leader handoff during active transaction; "
+		                    "transaction state lost. Retry."));
+		ThrowDatabaseException();
+		return false;
+	}
+
+	// Per-pool-clone log — every clone in ibConnectionPool::m_entries
+	// hits this when the leader URL changes, so a 20-clone pool would
+	// spam 20 identical "handoff detected" lines per cluster event.
+	// Cluster-level handoff is already logged once by
+	// ibFirebirdLeaderMode's heartbeat thread. Debug only.
+	wxLogDebug(wxT("ibDatabaseLayerFirebird: leader handoff detected ")
+	           wxT("(was %s, now %s); reconnecting"),
+	           m_currentConnectUrl, currentLeaderUrl);
+
+	// Tear down the existing handle — best-effort. If the underlying
+	// TCP socket is already dead (leader process gone), Close will
+	// fail; we ignore that and march on to the fresh Open. CloseResultSets
+	// and CloseStatements inside Close invalidate any caller-held
+	// result-set / prepared statement so subsequent use surfaces as
+	// "handle invalid" rather than silently reading from the old
+	// connection.
+	try { Close(); } catch (...) { /* best-effort */ }
+	m_pDatabase = 0;
+	m_pTransaction = 0;
+	m_currentConnectUrl.Clear();
+
+	// Open() re-runs InitForDatabase + attach against whatever URL
+	// the leader-mode singleton currently reports. m_strDatabase is
+	// unchanged, so leader-mode's per-dbPath cache resolves the same
+	// orchestrator state. Catch any exception from Open — caller
+	// invoked us from DoBeginTransaction which doesn't expect reconnect
+	// to throw; surface as logged failure instead.
+	bool opened = false;
+	try { opened = Open(); } catch (...) { opened = false; }
+	if (!opened) {
+		wxLogError(wxT("ibDatabaseLayerFirebird: reconnect against new ")
+		           wxT("leader URL %s failed"), currentLeaderUrl);
+		return false;
+	}
+	return true;
+}
+
 bool ibDatabaseLayerFirebird::IsAvailable()
 {
 	bool bAvailable = false;
@@ -1347,4 +1648,5 @@ bool ibDatabaseLayerFirebird::IsAvailable()
 	wxDELETE(pInterface);
 	return bAvailable;
 }
+
 

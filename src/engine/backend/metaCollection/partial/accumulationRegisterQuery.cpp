@@ -2,6 +2,7 @@
 #include "backend/databaseLayer/databaseLayer.h"
 #include "backend/databaseLayer/databaseErrorCodes.h"
 #include "backend/appData.h"
+#include "backend/query/dbTableProvider.h"   // ibDbTableProvider::SetValueAttribute — DB write decomposition
 
 ////////////////////////////////////////////////////////////////////////////////
 
@@ -19,7 +20,7 @@ bool ibValueMetaObjectAccumulationRegister::CreateAndUpdateBalancesTableDB(ibMet
 		retCode = ProcessAttribute(tableName,
 			m_propertyAttributePeriod->GetMetaObject(), nullptr);
 
-		for (const auto object : GetDimentionArrayObject()) {
+		for (const auto object : GetDimensionArrayObject()) {
 			if (retCode == DATABASE_LAYER_QUERY_RESULT_ERROR)
 				return false;
 			retCode = ProcessDimension(tableName,
@@ -44,7 +45,7 @@ bool ibValueMetaObjectAccumulationRegister::CreateAndUpdateBalancesTableDB(ibMet
 			if (!UpdateCurrentRecords(tableName, dstValue))
 				return false;
 			//dimensions from dst 
-			for (const auto object : dstValue->GetDimentionArrayObject()) {
+			for (const auto object : dstValue->GetDimensionArrayObject()) {
 				ibValueMetaObject* foundedMeta =
 					ibValueMetaObjectRegisterData::FindDimensionObjectByFilter(object->GetGuid());
 				if (foundedMeta == nullptr) {
@@ -55,7 +56,7 @@ bool ibValueMetaObjectAccumulationRegister::CreateAndUpdateBalancesTableDB(ibMet
 			}
 
 			//dimensions current
-			for (const auto object : GetDimentionArrayObject()) {
+			for (const auto object : GetDimensionArrayObject()) {
 				retCode = ProcessDimension(tableName,
 					object, dstValue->FindDimensionObjectByFilter(object->GetGuid())
 				);
@@ -110,7 +111,7 @@ bool ibValueMetaObjectAccumulationRegister::CreateAndUpdateTurnoverTableDB(ibMet
 		retCode = ProcessAttribute(tableName,
 			m_propertyAttributePeriod->GetMetaObject(), nullptr);
 
-		for (const auto object : GetDimentionArrayObject()) {
+		for (const auto object : GetDimensionArrayObject()) {
 			if (retCode == DATABASE_LAYER_QUERY_RESULT_ERROR)
 				return false;
 			retCode = ProcessDimension(tableName,
@@ -135,7 +136,7 @@ bool ibValueMetaObjectAccumulationRegister::CreateAndUpdateTurnoverTableDB(ibMet
 			if (!UpdateCurrentRecords(tableName, dstValue))
 				return false;
 			//dimensions from dst 
-			for (const auto object : dstValue->GetDimentionArrayObject()) {
+			for (const auto object : dstValue->GetDimensionArrayObject()) {
 				ibValueMetaObject* foundedMeta =
 					ibValueMetaObjectRegisterData::FindDimensionObjectByFilter(object->GetGuid());
 				if (foundedMeta == nullptr) {
@@ -146,7 +147,7 @@ bool ibValueMetaObjectAccumulationRegister::CreateAndUpdateTurnoverTableDB(ibMet
 			}
 
 			//dimensions current
-			for (const auto object : GetDimentionArrayObject()) {
+			for (const auto object : GetDimensionArrayObject()) {
 				retCode = ProcessDimension(tableName,
 					object, dstValue->FindDimensionObjectByFilter(object->GetGuid())
 				);
@@ -264,7 +265,7 @@ bool ibValueRecordSetObjectAccumulationRegister::SaveVirtualTable()
 	wxString tableName = metaObject->GetRegisterTableNameDB(); bool firstUpdate = true;
 	wxString queryText = "UPDATE OR INSERT INTO " + tableName + "(" + ibValueMetaObjectAttributeBase::GetSQLFieldName(attributePeriod);
 
-	for (const auto object : metaObject->GetDimentionArrayObject()) {
+	for (const auto object : metaObject->GetDimensionArrayObject()) {
 		queryText += "," + ibValueMetaObjectAttributeBase::GetSQLFieldName(attribute);
 	}
 
@@ -278,7 +279,7 @@ bool ibValueRecordSetObjectAccumulationRegister::SaveVirtualTable()
 		}
 	}
 
-	for (const auto object : metaObject->GetDimentionArrayObject()) {
+	for (const auto object : metaObject->GetDimensionArrayObject()) {
 		for (unsigned int i = 0; i < ibValueMetaObjectAttributeBase::GetSQLFieldCount(attribute); i++) {
 			queryText += ",?";
 		}
@@ -286,7 +287,7 @@ bool ibValueRecordSetObjectAccumulationRegister::SaveVirtualTable()
 
 	queryText += ") MATCHING ( " + ibValueMetaObjectAttributeBase::GetSQLFieldName(attributePeriod);
 
-	for (const auto object : metaObject->GetDimentionArrayObject()) {
+	for (const auto object : metaObject->GetDimensionArrayObject()) {
 		queryText += "," + ibValueMetaObjectAttributeBase::GetSQLFieldName(attribute);
 	}
 
@@ -306,17 +307,17 @@ bool ibValueRecordSetObjectAccumulationRegister::SaveVirtualTable()
 
 		int position = 1;
 
-		ibValueMetaObjectAttributeBase::SetValueAttribute(
+		ibDbTableProvider::SetValueAttribute(
 			attributePeriod,
 			objectValue.at(attributePeriod->GetMetaID()),
 			statement,
 			position
 		);
 
-		for (const auto object : metaObject->GetDimentionArrayObject()) {
+		for (const auto object : metaObject->GetDimensionArrayObject()) {
 			auto foundedKey = m_keyValues.find(attribute->GetMetaID());
 			if (foundedKey != m_keyValues.end()) {
-				ibValueMetaObjectAttributeBase::SetValueAttribute(
+				ibDbTableProvider::SetValueAttribute(
 					attribute,
 					foundedKey->second,
 					statement,
@@ -324,7 +325,7 @@ bool ibValueRecordSetObjectAccumulationRegister::SaveVirtualTable()
 				);
 			}
 			else {
-				ibValueMetaObjectAttributeBase::SetValueAttribute(
+				ibDbTableProvider::SetValueAttribute(
 					attribute,
 					objectValue.at(attribute->GetMetaID()),
 					statement,
@@ -354,7 +355,7 @@ bool ibValueRecordSetObjectAccumulationRegister::DeleteVirtualTable()
 	wxString tableName = metaObject->GetRegisterTableNameDB();
 	wxString queryText = "DELETE FROM " + tableName; bool firstWhere = true;
 
-	for (const auto object : metaObject->GetDimentionArrayObject()) {
+	for (const auto object : metaObject->GetDimensionArrayObject()) {
 		if (!ibValueRecordSetObject::FindKeyValue(attribute->GetMetaID()))
 			continue;
 		if (firstWhere) {
@@ -375,7 +376,7 @@ bool ibValueRecordSetObjectAccumulationRegister::DeleteVirtualTable()
 	for (const auto object : metaObject->GetGenericAttributeArrayObject()) {
 		if (!ibValueRecordSetObject::FindKeyValue(attribute->GetMetaID()))
 			continue;
-		ibValueMetaObjectAttributeBase::SetValueAttribute(
+		ibDbTableProvider::SetValueAttribute(
 			attribute,
 			m_keyValues.at(attribute->GetMetaID()),
 			statement,

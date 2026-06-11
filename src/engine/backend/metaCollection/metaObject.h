@@ -1,4 +1,4 @@
-﻿#ifndef __META_OBJECT_H__
+#ifndef __META_OBJECT_H__
 #define __META_OBJECT_H__
 
 #include "backend/propertyManager/propertyManager.h"
@@ -94,10 +94,16 @@ enum metaObjectFlags {
 
 #define rt_ref_chunk 0x800060
 
-//flags metaobject 
+//flags metaobject
 #define metaDeletedFlag 0x0001000
 #define metaCanSaveFlag 0x0002000
 #define metaDisableFlag 0x0008000
+// Predefined child: created in the owner's ctor via CreateMetaObjectAndSetParent
+// (predefined attributes, inner modules). Such a child is bound to its parent for
+// life - an in-place reset of the parent (RemoveAllChildren on a reused root:
+// configuration / external report / data processor) must NOT drop it, only the
+// parent's actual destruction does. Not serialized; re-set every construction.
+#define metaPredefinedFlag 0x0010000
 
 #define metaDefaultFlag metaCanSaveFlag
 
@@ -110,12 +116,12 @@ enum metaObjectFlags {
 
 class BACKEND_API ibValueMetaObject :
 
-	public ibValue,
+	public ibValueDynamicMembers,
 
 	public ibPropertyObjectHelper<ibValueMetaObject>,
 	public ibAccessObject, public ibInterfaceObject {
+	public:
 
-	wxDECLARE_ABSTRACT_CLASS(ibValueMetaObject);
 
 public:
 
@@ -144,7 +150,10 @@ public:
 	void SetHelpContent(const wxString& strHelpContent) { m_strHelpContent = strHelpContent; }
 
 	virtual void SetMetaData(ibMetaData* metaData) { m_metaData = metaData; }
-	virtual ibMetaData* GetMetaData() const override { return m_metaData; }
+	virtual const ibMetaData* GetMetaData() const override { return m_metaData; }
+	// Mutable accessor - metaobjects own a mutable m_metaData. Not an override:
+	// the factory root only declares the const capability (see backend_type.h).
+	virtual ibMetaData* GetMetaData() { return m_metaData; }
 
 	void ResetGuid();
 	void ResetId();
@@ -264,13 +273,9 @@ public:
 		return true;
 	}
 
-	//methods 
-	virtual ibValueMethodHelper* GetPMethods() const override { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames();
-		return m_methodHelper;
-	}
-
-	virtual void PrepareNames() const override; // this method is automatically called to initialize attribute and method names.
+	//methods
+	// DoGetPMethods (protected) + by-value m_members come from ibValueDynamicMembers.
+	void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 	//attributes
 	virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal) override;        //setting attribute
@@ -284,21 +289,46 @@ public:
 	bool LoadMeta(ibReaderMemory& dataReader);
 	bool SaveMeta(ibWriterMemory& dataWritter);
 
-	//load & save object
-	bool LoadMetaObject(ibMetaData* metaData, ibReaderMemory& dataReader);
-	bool SaveMetaObject(ibMetaData* metaData, ibWriterMemory& dataWritter, int flags = defaultFlag);
-	bool DeleteMetaObject(ibMetaData* metaData);
+	// Recursive tree (de)serialization, node-owned. The ibMetaData containers
+	// delegate their whole-tree Save/Load/Delete here (see ibMetaData::*Tree).
+	// Byte layout: <chunkId>{ <metaID>{ eDataBlock{own data} eChildBlock{children} } }.
+	// All three use this node's own m_metaData (a node's parent always has it:
+	// the root is stamped by the container via SetMetaData, and each child is
+	// stamped here from its parent at creation), so no owner is threaded.
+	//   SaveSubtree  - write this node + descendants under `chunkId`.
+	//   LoadSubtree  - `nodeReader` is this node's { eDataBlock, eChildBlock }
+	//                  content; create+load children (stamping their metadata),
+	//                  then load own data. `resetId` regenerates each loaded node's
+	//                  metaId from its (already-stamped) metadata counter - used when
+	//                  grafting a file's subtree into a config so the imported objects
+	//                  get fresh ids instead of the file's (which would collide with
+	//                  existing config objects). The root additionally needs ResetAll
+	//                  (guid drives its ctor clsid) - done by the importing container.
+	//   DeleteSubtree- purge IsDeleted descendants (DeleteMetaObject + detach).
+	bool SaveSubtree(const ibClassID& chunkId, ibWriterMemory& writer, int flags = defaultFlag);
+	bool LoadSubtree(ibReaderMemory& nodeReader, bool resetId = false);
+	bool DeleteSubtree();
 
-	// save & delete object in DB 
+	// Runtime lifecycle walk over THIS node + descendants. before=true is the pre
+	// phase (OnBeforeRun/Close), before=false the post phase. Deleted nodes (and
+	// their subtree) are skipped. The walk fires the hook on the node itself:
+	// RunSubtree is top-down (self before children), CloseSubtree is bottom-up
+	// (children before self, so the root closes last) - a caller just drives the
+	// before/after phase on the root, no separate root-hook firing.
+	bool RunSubtree(int flags, bool before);
+	bool CloseSubtree(bool before);
+
+	// save & delete object in DB
 	bool CreateMetaTable(ibMetaDataConfiguration* srcMetaData, int flags = createMetaTable);
 	bool UpdateMetaTable(ibMetaDataConfiguration* srcMetaData, ibValueMetaObject* srcMetaObject);
 	bool DeleteMetaTable(ibMetaDataConfiguration* srcMetaData);
 
-	// load & save config data 
-	virtual bool LoadTableData(const ibReaderMemory& reader) { return true; }
-	virtual bool SaveTableData(ibWriterMemory& writer) const { return true; }
+	// dump & restore table data (per-object rows: constant value, register
+	// records, etc. - distinct from metadata-tree (Load/SaveCommonTree))
+	virtual bool RestoreTable(const ibReaderMemory& reader) { return true; }
+	virtual bool DumpTable(ibWriterMemory& writer) const { return true; }
 
-	//events: 
+	//events:
 	virtual bool OnCreateMetaObject(ibMetaData* metaData, int flags);
 	virtual bool OnLoadMetaObject(ibMetaData* metaData);
 	virtual bool OnSaveMetaObject(int flags) { return true; }
@@ -308,8 +338,8 @@ public:
 	//for designer 
 	virtual bool OnReloadMetaObject() { return true; }
 
-	//module manager is started or exit 
-	//after and before for designer 
+	//module manager is started or exit
+	//after and before for designer
 	virtual bool OnBeforeRunMetaObject(int flags) { return true; }
 	virtual bool OnAfterRunMetaObject(int flags) { return true; }
 
@@ -374,10 +404,18 @@ public:
 	T* CreateMetaObjectAndSetParent(Args&&... args) {
 		T* createdObject = ibValue::CreateAndConvertObjectValueRef<T>(args...);
 		wxASSERT(createdObject);
-		//set child/parent
+		//set child/parent - predefined child, pinned to this parent for life
 		createdObject->SetParent(this);
+		createdObject->SetFlag(metaPredefinedFlag);
 		this->AddChild(createdObject);
 		return createdObject;
+	}
+
+	// Predefined children (set in CreateMetaObjectAndSetParent) are bound to the
+	// parent's lifetime: a reload reset of the parent keeps them, only the
+	// parent's destruction drops them. See RemoveAllChildren(keepPinned).
+	virtual bool IsPinnedToParent() const override {
+		return (m_metaFlags & metaPredefinedFlag) != 0;
 	}
 
 protected:
@@ -414,7 +452,7 @@ protected:
 		std::initializer_list<ibClassID> filter,
 		const bool use_child_filter = false) const
 	{
-		for (auto& child : m_children) {
+		for (ibValueMetaObject* child : m_children) {
 
 			if (!child->IsAllowed())
 				continue;
@@ -455,7 +493,7 @@ protected:
 		if (name.IsEmpty())
 			return nullptr;
 
-		for (auto& child : m_children) {
+		for (ibValueMetaObject* child : m_children) {
 
 			if (child->IsDeleted())
 				continue;
@@ -502,7 +540,7 @@ protected:
 		if (id <= 0)
 			return nullptr;
 
-		for (auto& child : m_children) {
+		for (ibValueMetaObject* child : m_children) {
 
 			if (child->IsDeleted())
 				continue;
@@ -549,7 +587,7 @@ protected:
 		if (!id.isValid())
 			return nullptr;
 
-		for (auto& child : m_children) {
+		for (ibValueMetaObject* child : m_children) {
 
 			if (child->IsDeleted())
 				continue;
@@ -601,7 +639,6 @@ protected:
 	ibGuid m_metaGuid;
 
 	ibMetaData* m_metaData;
-	ibValueMethodHelper* m_methodHelper;
 
 	wxString m_strHelpContent;
 

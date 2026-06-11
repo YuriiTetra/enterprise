@@ -1,13 +1,17 @@
-﻿#ifndef _OBJECT_LIST_H__
+#ifndef _OBJECT_LIST_H__
 #define _OBJECT_LIST_H__
 
 #include "backend/metaCollection/partial/commonObject.h"
 #include "backend/metaCollection/partial/reference/reference.h"
 
-//base list class 
+#include <memory>
+
+struct ibRenderedPageCache;   // backend/query/dataQueryBuilder.h — build-once page cache
+
+//base list class
 class BACKEND_API ibValueListDataObject : public ibValueModelTableBase,
 	public ibSourceDataObject {
-	wxDECLARE_ABSTRACT_CLASS(ibValueListDataObject);
+	public:
 protected:
 	enum Func {
 		enRefresh
@@ -19,7 +23,7 @@ private:
 	virtual ibValueModelReturnLine* GetRowAt(const ibDataViewItem& line) override {
 		if (!line.IsOk())
 			return nullptr;
-		return ibValue::CreateAndPrepareValueRef<ibValueDataObjectListReturnLine>(this, line);
+		return new ibValueDataObjectListReturnLine(this, line);
 	}
 
 public:
@@ -37,11 +41,9 @@ public:
 	}
 
 	class ibValueDataObjectListColumnCollection : public ibValueModelTableBase::ibValueModelColumnCollection {
-		wxDECLARE_DYNAMIC_CLASS(ibValueDataObjectListColumnCollection);
 	public:
 		class ibValueDataObjectListColumnInfo : public ibValueModelTableBase::ibValueModelColumnCollection::ibValueModelColumnInfo {
-			wxDECLARE_DYNAMIC_CLASS(ibValueDataObjectListColumnInfo);
-		public:
+	public:
 
 			virtual unsigned int GetColumnID() const { return m_metaAttribute->GetMetaID(); }
 			virtual wxString GetColumnName() const { return m_metaAttribute->GetName(); }
@@ -91,11 +93,9 @@ public:
 
 		ibValueListDataObject* m_ownerTable;
 		std::map<ibMetaID, ibValuePtr<ibValueDataObjectListColumnInfo>> m_listColumnInfo;
-		ibValueMethodHelper* m_methodHelper;
 	};
 
 	class ibValueDataObjectListReturnLine : public ibValueModelReturnLine {
-		wxDECLARE_DYNAMIC_CLASS(ibValueDataObjectListReturnLine);
 	public:
 
 		ibValueDataObjectListReturnLine(ibValueListDataObject* ownerTable = nullptr, const ibDataViewItem& line = ibDataViewItem(nullptr));
@@ -105,19 +105,14 @@ public:
 			return m_ownerTable;
 		}
 
-		virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-			//PrepareNames(); 
-			return m_methodHelper;
-		}
 
-		virtual void PrepareNames() const;
+		void FillMembers(ibMemberTable& helper) const;
 
 		virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal); //setting attribute
 		virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal); //attribute value
 
 	protected:
 		ibValueListDataObject* m_ownerTable;
-		ibValueMethodHelper* m_methodHelper;
 	};
 
 public:
@@ -143,10 +138,6 @@ public:
 		if (node == nullptr)
 			return false;
 		return node->GetValue(id, pvarMetaVal);
-	}
-
-	virtual bool GetValueAttribute(const ibValueMetaObjectAttributeBase* metaAttr, ibValue& retValue, class ibDatabaseResultSet* resultSet, bool createData = true) {
-		return ibValueMetaObjectAttributeBase::GetValueAttribute(metaAttr, retValue, resultSet, createData);
 	}
 
 	//ctor
@@ -193,13 +184,17 @@ public:
 protected:
 	ibGuid m_objGuid;
 	ibValuePtr<ibValueDataObjectListColumnCollection> m_recordColumnCollection;
-	ibValueMethodHelper* m_methodHelper;
+
+	// Build-once page-query cache (Lever 1 / docs §20): the L3 door reuses the
+	// resolved identity sort + rendered SQL across scroll ticks, rebinding only
+	// the anchor. Self-invalidating by signature; lazily created on first Fetch.
+	// Lives here so it persists with the model. Flat-list Fetch path only.
+	mutable std::shared_ptr<ibRenderedPageCache> m_pageCache;
 };
 
-// list enumeration 
+// list enumeration
 class BACKEND_API ibValueListDataObjectEnumRef : public ibValueListDataObject {
-	wxDECLARE_DYNAMIC_CLASS(ibValueListDataObjectRef);
-public:
+	public:
 	struct ibValueTableEnumRow : public ibValueTableRow {
 		ibValueTableEnumRow(const ibGuid& guid) :
 			ibValueTableRow(), m_objGuid(guid) {
@@ -207,7 +202,7 @@ public:
 		ibGuid GetGuid() const {
 			return m_objGuid;
 		}
-		// Logical equality by m_objGuid — see ibValueTableListRow.
+		// Logical equality by m_objGuid - see ibValueTableListRow.
 		virtual bool IsEqualTo(const ibDataViewObject& other) const override {
 			const auto* o = dynamic_cast<const ibValueTableEnumRow*>(&other);
 			return o != nullptr && m_objGuid == o->m_objGuid;
@@ -238,12 +233,8 @@ public:
 	//****************************************************************************
 	//*                              Support methods                             *
 	//****************************************************************************
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return m_methodHelper;
-	}
 
-	virtual void PrepareNames() const;
+	void FillMembers(ibMemberTable& helper) const;
 
 	//****************************************************************************
 	//*                              Override attribute                          *
@@ -282,7 +273,7 @@ public:
 	//*                               Paging                                     *
 	//****************************************************************************
 
-	// Single-batch paging — enums are tiny and the parent-position
+	// Single-batch paging - enums are tiny and the parent-position
 	// CASE/WHEN order doesn't support stable cursoring.
 
 	// Advertise DbFetch so script-side `For Each` routes through the
@@ -294,7 +285,7 @@ public:
 		return f;
 	}
 
-	// Universal Get*Fetch — frontend (ibDataViewCtrl) holds the deque,
+	// Universal Get*Fetch - frontend (ibDataViewCtrl) holds the deque,
 	// calls these to refill ahead/behind windows. Stateless: each call
 	// builds an ibFetchRequest and runs SQL through Fetch() below.
 	virtual unsigned int GetFirstFetch(const ibDataViewItem& parent,
@@ -322,8 +313,7 @@ private:
 
 // list without parent  
 class BACKEND_API ibValueListDataObjectRef : public ibValueListDataObject {
-	wxDECLARE_DYNAMIC_CLASS(ibValueListDataObjectRef);
-public:
+	public:
 	struct ibValueTableListRow : public ibValueTableRow {
 		ibValueTableListRow(const ibGuid& guid) :
 			ibValueTableRow(), m_objGuid(guid) {
@@ -331,7 +321,7 @@ public:
 		ibGuid GetGuid() const {
 			return m_objGuid;
 		}
-		// Logical equality by business GUID — mirrors
+		// Logical equality by business GUID - mirrors
 		// ibValueTreeListNode.  Lets a stub row carrying only m_objGuid
 		// (as built by FindRowValue's SQL-fallback for the post-Save
 		// focus-restore path) match fully-materialised rows from
@@ -363,12 +353,8 @@ public:
 	//****************************************************************************
 	//*                              Support methods                             *
 	//****************************************************************************
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return m_methodHelper;
-	}
 
-	virtual void PrepareNames() const;
+	void FillMembers(ibMemberTable& helper) const;
 
 	//****************************************************************************
 	//*                              Override attribute                          *
@@ -416,7 +402,7 @@ public:
 	//****************************************************************************
 
 
-	// Catalog list — DB-backed flat fetch with user filters and
+	// Catalog list - DB-backed flat fetch with user filters and
 	// column sorting.  No folder / hierarchy concept (that lives on
 	// FolderRef tree); list view is always flat.
 	virtual Features GetFeatures() const override {
@@ -425,7 +411,7 @@ public:
 		return f;
 	}
 
-	// Universal Get*Fetch — see header at the Enum class declaration.
+	// Universal Get*Fetch - see header at the Enum class declaration.
 	virtual unsigned int GetFirstFetch(const ibDataViewItem& parent,
 		const ibDataViewItem& anchor, int count, ibDataViewItemArray& out) const override;
 	virtual unsigned int GetNextFetch(const ibDataViewItem& parent,
@@ -440,7 +426,7 @@ private:
 	//****************************************************************************
 
 
-	// Cursor-paginated fetch — single SQL point used by Get*Fetch.
+	// Cursor-paginated fetch - single SQL point used by Get*Fetch.
 	ibFetchResponse<ibGuid, ibValueTableListRow>
 		Fetch(const ibFetchRequest<ibGuid>& req) const;
 
@@ -453,13 +439,12 @@ private:
 
 // list register
 class BACKEND_API ibValueListRegisterObject : public ibValueListDataObject {
-	wxDECLARE_DYNAMIC_CLASS(ibValueListRegisterObject);
-public:
+	public:
 	// Register row carries TWO maps:
-	//  * m_nodeKeys   — identity columns (recorder + line for HasRecorder
+	//  * m_nodeKeys   - identity columns (recorder + line for HasRecorder
 	//                   registers, dimensions otherwise).  Stable PK for
 	//                   row equality across paged refetch.
-	//  * m_nodeValues — resources, inherited from ibValueTableRow.  Set
+	//  * m_nodeValues - resources, inherited from ibValueTableRow.  Set
 	//                   from fetch via AppendTableValue, displayed in
 	//                   the table.  Empty on a stub built by
 	//                   FindRowValue for post-Save focus restore.
@@ -470,13 +455,13 @@ public:
 		void AppendNodeValue(const ibMetaID& id, const ibValue& variant) { m_nodeKeys.insert_or_assign(id, variant); }
 		ibValue& AppendNodeValue(const ibMetaID& id) { return m_nodeKeys[id]; }
 
-		const ibMetaValueArray& GetNodeKeys() const { return m_nodeKeys; }
+		const ibRowMetaValues& GetNodeKeys() const { return m_nodeKeys; }
 
 		ibUniqueKeyPair GetUniquePairKey(const ibValueMetaObjectRegisterData* metaObject) const {
 			return metaObject->CreateUniqueKeyPair(m_nodeKeys);
 		}
 
-		// Logical equality by identity keys — mirrors Catalog/Enum's
+		// Logical equality by identity keys - mirrors Catalog/Enum's
 		// IsEqualTo by m_objGuid.  Default ibValueTableRow::IsEqualTo
 		// compares m_nodeValues (resources) which would never match a
 		// stub built by FindRowValue (resources empty).  Override to
@@ -489,13 +474,19 @@ public:
 		}
 
 	private:
-		ibMetaValueArray m_nodeKeys;
+		ibRowMetaValues m_nodeKeys;
 	};
 public:
 
 	virtual bool UseStandartCommand() const { return !m_metaObject->HasRecorder(); }
 
 	virtual ibDataViewItem FindRowValue(const ibValue& varValue, const wxString& colName = wxEmptyString) const;
+
+	// Effective cursor order = enabled user sort ++ the register's identity tail
+	// (recorder+line / period?+dimensions), via the L3 door. The keyset anchor is
+	// built by iterating this so its per-column values line up with the order the
+	// door's anchor predicate binds them.
+	std::vector<ibQuerySortItem> EffectiveSortOrder() const;
 
 	//Constructor
 	ibValueListRegisterObject(const ibValueMetaObjectRegisterData* metaObject = nullptr, const ibFormID& formType = wxNOT_FOUND);
@@ -512,12 +503,8 @@ public:
 	//****************************************************************************
 	//*                              Support methods                             *
 	//****************************************************************************
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return m_methodHelper;
-	}
 
-	virtual void PrepareNames() const;
+	void FillMembers(ibMemberTable& helper) const;
 	virtual bool CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray);       // method call
 
 	//****************************************************************************
@@ -591,7 +578,7 @@ private:
 //base tree class 
 class BACKEND_API ibValueModelTreeDataObject : public ibValueModelTreeBase,
 	public ibSourceDataObject {
-	wxDECLARE_ABSTRACT_CLASS(ibValueModelTreeDataObject);
+	public:
 protected:
 	enum Func {
 		enRefresh
@@ -603,17 +590,15 @@ private:
 	virtual ibValueModelReturnLine* GetRowAt(const ibDataViewItem& line) {
 		if (!line.IsOk())
 			return nullptr;
-		return ibValue::CreateAndPrepareValueRef<ibValueDataObjectTreeReturnLine>(this, line);
+		return new ibValueDataObjectTreeReturnLine(this, line);
 	}
 
 public:
 
 	class ibValueDataObjectTreeColumnCollection : public ibValueModelTreeBase::ibValueModelColumnCollection {
-		wxDECLARE_DYNAMIC_CLASS(ibValueDataObjectTreeColumnCollection);
 	public:
 		class ibValueDataObjectTreeColumnInfo : public ibValueModelTreeBase::ibValueModelColumnCollection::ibValueModelColumnInfo {
-			wxDECLARE_DYNAMIC_CLASS(ibValueDataObjectTreeColumnInfo);
-		public:
+	public:
 
 			virtual unsigned int GetColumnID() const { return m_metaAttribute->GetMetaID(); }
 			virtual wxString GetColumnName() const { return m_metaAttribute->GetName(); }
@@ -663,11 +648,9 @@ public:
 
 		ibValueModelTreeDataObject* m_ownerTable;
 		std::map<ibMetaID, ibValuePtr<ibValueDataObjectTreeColumnInfo>> m_listColumnInfo;
-		ibValueMethodHelper* m_methodHelper;
 	};
 
 	class ibValueDataObjectTreeReturnLine : public ibValueModelReturnLine {
-		wxDECLARE_DYNAMIC_CLASS(ibValueDataObjectTreeReturnLine);
 	public:
 
 		ibValueDataObjectTreeReturnLine(ibValueModelTreeDataObject* ownerTable = nullptr, const ibDataViewItem& line = ibDataViewItem(nullptr));
@@ -677,18 +660,13 @@ public:
 			return m_ownerTable;
 		}
 
-		virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-			//PrepareNames(); 
-			return m_methodHelper;
-		}
 
-		virtual void PrepareNames() const;                         // this method is automatically called to initialize attribute and method names.
+		void FillMembers(ibMemberTable& helper) const;
 
 		virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal); //setting attribute
 		virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal); //attribute value
 
 	protected:
-		ibValueMethodHelper* m_methodHelper;
 		ibValueModelTreeDataObject* m_ownerTable;
 	};
 
@@ -762,13 +740,11 @@ protected:
 
 	ibGuid m_objGuid;
 	ibValuePtr<ibValueDataObjectTreeColumnCollection> m_recordColumnCollection;
-	ibValueMethodHelper* m_methodHelper;
 };
 
 // tree with parent or only parent 
 class BACKEND_API ibValueModelTreeDataObjectFolderRef : public ibValueModelTreeDataObject {
-	wxDECLARE_DYNAMIC_CLASS(ibValueModelTreeDataObjectFolderRef);
-public:
+	public:
 
 	enum {
 		LIST_FOLDER,
@@ -777,7 +753,7 @@ public:
 	};
 
 	struct ibValueTreeListNode : public ibValueTreeNode {
-		// Lazy-load state for the node's own children — set Loaded once
+		// Lazy-load state for the node's own children - set Loaded once
 		// FetchChildrenForNode has populated m_children at least once.
 		// mutable so const GetChildren() can drive the fetch on first
 		// expand without const_cast'ing the whole node.
@@ -791,7 +767,7 @@ public:
 			ibValueTreeNode(parent), m_objGuid(guid), m_container(container) {
 			m_valueTree = treeValue;
 		}
-		// Folder flag wins over the base "has children loaded" check —
+		// Folder flag wins over the base "has children loaded" check -
 		// a paged FolderRef row knows it CAN contain children even
 		// when m_children isn't populated yet.
 		virtual bool IsContainer() const override { return m_container; }
@@ -844,11 +820,7 @@ public:
 	//****************************************************************************
 	//*                              Support methods                             *
 	//****************************************************************************
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return m_methodHelper;
-	}
-	virtual void PrepareNames() const;
+	void FillMembers(ibMemberTable& helper) const;
 
 	//****************************************************************************
 	//*                              Override attribute                          *
@@ -891,7 +863,7 @@ public:
 
 private:
 	// Three-source parent resolution shared by AddValue / AddFolderValue:
-	// selected node's parent (item) or self (folder) → drill-chain head →
+	// selected node's parent (item) or self (folder) ? drill-chain head ?
 	// empty (catalog root).  Returns the resolved parent value into outParent.
 	void ResolveParentForNew(ibValue& outParent) const;
 public:
@@ -899,7 +871,7 @@ public:
 	virtual void MarkAsDeleteValue();
 	virtual void ChooseValue(ibBackendValueForm* srcForm);
 
-	// FolderRef — DB-backed tree with folder concept plus user
+	// FolderRef - DB-backed tree with folder concept plus user
 	// filters and column sorting.  isFolder ID lets the GUI emit
 	// folder-first ORDER BY when rendering as a tree / hierarchy.
 	virtual Features GetFeatures() const override {
@@ -924,17 +896,17 @@ public:
 	std::vector<ibGuid> GetAncestorChain(const ibGuid& fromGuid) const;
 
 	// Materialise ibValueTreeListNode objects for each guid in `guids`,
-	// in input order.  One SELECT with WHERE uuid IN (…), so the cost
+	// in input order.  One SELECT with WHERE uuid IN (.), so the cost
 	// is one round-trip regardless of chain depth.  Caller takes
 	// ownership of the returned pointers (refcount=1).  Used by the
 	// view-mode switch path to populate m_topParentChain when entering
 	// Hierarchical from List/Tree (the selected row's ancestors weren't
-	// loaded as nodes by the flat fetch — we need their full data here
+	// loaded as nodes by the flat fetch - we need their full data here
 	// for crumb labels).
 	std::vector<ibValueTreeListNode*>
 	    LoadRowsByGuids(const std::vector<ibGuid>& guids) const;
 
-	// Universal breadcrumb override — chain GUIDs via GetAncestorChain
+	// Universal breadcrumb override - chain GUIDs via GetAncestorChain
 	// (cached), materialise rows via LoadRowsByGuids, transfer
 	// ownership to ibDataViewItem with the standard adopt dance.
 	virtual void BuildAncestorBreadcrumb(const ibDataViewItem& fromRow,
@@ -947,14 +919,14 @@ public:
 	// Args for NextFetch / PrevFetch.  All row references are opaque
 	// ibDataViewItem (control-side identity); model decodes internally
 	// to its row type when needed.  Selection and viewport are
-	// distinct — user can scroll without changing the selected row.
-	//   m_parent          — scope (invalid item == top-level).
-	//   m_currentRow      — user selection; preserved across fetch so
+	// distinct - user can scroll without changing the selected row.
+	//   m_parent          - scope (invalid item == top-level).
+	//   m_currentRow      - user selection; preserved across fetch so
 	//                       GUI can re-focus it after the buffer
 	//                       updates (positioning target).
-	//   m_viewportAnchor  — last (Next) / first (Prev) visible row;
+	//   m_viewportAnchor  - last (Next) / first (Prev) visible row;
 	//                       the SQL cursor.
-	//   m_count           — batch size (default 1 for tape-like scroll
+	//   m_count           - batch size (default 1 for tape-like scroll
 	//                       tick; viewport-size for initial open).
 	struct ibTreeFetchArgs {
 		ibDataViewItem m_parent;
@@ -969,17 +941,17 @@ public:
 	};
 
 	// First batch.  Two cases:
-	//   * empty m_viewportAnchor — cold open, fetch top of dataset;
-	//   * non-empty m_viewportAnchor — restoration fetch (paged Refresh
+	//   * empty m_viewportAnchor - cold open, fetch top of dataset;
+	//   * non-empty m_viewportAnchor - restoration fetch (paged Refresh
 	//     / sort change), anchor row lands in items[0] via INCLUSIVE
 	//     cursor (Reset direction).  Call GetNextFetch (Forward, strict)
 	//     for plain forward-scroll page.
 	ibTreeFetchResponse GetFirstFetch(const ibTreeFetchArgs& args) const;
 
-	// Next portion forward — rows STRICTLY after m_viewportAnchor under m_parent.
+	// Next portion forward - rows STRICTLY after m_viewportAnchor under m_parent.
 	ibTreeFetchResponse GetNextFetch(const ibTreeFetchArgs& args) const;
 
-	// Previous portion backward — rows before m_viewportAnchor.
+	// Previous portion backward - rows before m_viewportAnchor.
 	ibTreeFetchResponse GetPrevFetch(const ibTreeFetchArgs& args) const;
 
 private:
@@ -990,7 +962,7 @@ private:
 		ibFetchDirection direction) const;
 public:
 
-	// Universal Get*Fetch overrides — adapt the typed ibTreeFetchArgs
+	// Universal Get*Fetch overrides - adapt the typed ibTreeFetchArgs
 	// API above to the non-templated virtual on ibValueModel base so
 	// generic frontend (BuildXxxHelper, Walker) reaches the paged path.
 	virtual unsigned int GetFirstFetch(const ibDataViewItem& parent,
@@ -1007,7 +979,7 @@ private:
 
 	// Ancestor-chain cache.  Control may fire GetAncestorChain
 	// repeatedly on the same fromGuid (breadcrumb redraw, drill
-	// re-entry) — re-walking the parent chain each time would hit
+	// re-entry) - re-walking the parent chain each time would hit
 	// the DB N+1 times for nothing.  Cache is keyed by fromGuid.
 	mutable ibGuid              m_chainCachedFor;
 	mutable std::vector<ibGuid> m_chainCache;

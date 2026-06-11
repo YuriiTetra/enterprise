@@ -2,7 +2,7 @@
 
 bool ibValue::DoSerialize(wxString& strValue) const
 {
-	if (m_typeClass == ibValueTypes::TYPE_REFFER)
+	if (IsReference() && m_pRef != nullptr)
 		return m_pRef->DoSerialize(strValue);
 
 	switch (m_typeClass) {
@@ -16,7 +16,7 @@ bool ibValue::DoSerialize(wxString& strValue) const
 		strValue = m_fData.ToString();
 		return true;
 	case ibValueTypes::TYPE_STRING:
-		strValue = m_sData;
+		strValue = GetString();
 		return true;
 	case ibValueTypes::TYPE_DATE:
 		strValue = wxString::Format(wxT("%lld"), m_dData);
@@ -48,7 +48,7 @@ bool ibValue::DoDeserialize(const wxString& strValue)
 		return false;
 	}
 	case ibValueTypes::TYPE_STRING:
-		m_sData = strValue;
+		SetString(strValue);
 		return true;
 	case ibValueTypes::TYPE_DATE: {
 		wxLongLong_t val = 0;

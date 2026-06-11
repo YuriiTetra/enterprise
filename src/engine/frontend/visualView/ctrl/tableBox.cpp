@@ -15,10 +15,7 @@
 //*                           IMPLEMENT_DYNAMIC_CLASS                               *
 //***********************************************************************************
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueModelTableBox, ibValueWindow);
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueEnumTableBoxSelectionMode, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueEnumTableBoxViewMode, ibValue);
 
 #ifdef OES_USE_WEB
 #include "frontend/web/webWindow.h"
@@ -62,7 +59,7 @@ void ibValueModelTableBox::AddColumn()
 #ifndef OES_USE_WEB
 	wxASSERT(m_formOwner);
 
-	ibValueModelTableBoxColumn* columnTable = wxDynamicCast(m_formOwner->NewObject(g_controlTableBoxColumnCLSID, this), ibValueModelTableBoxColumn);
+	ibValueModelTableBoxColumn* columnTable = dynamic_cast<ibValueModelTableBoxColumn*>(m_formOwner->NewObject(g_controlTableBoxColumnCLSID, this));
 	g_visualHostContext->InsertControl(columnTable, this);
 	if (m_tableModel != nullptr) {
 		ibValueModel::ibValueModelColumnCollection* columnData = m_tableModel->GetColumnCollection();
@@ -91,7 +88,7 @@ void ibValueModelTableBox::CreateColumnCollection(ibDataViewCtrl* dataViewCtrl)
 	wxASSERT(tc);
 
 	ibFormVisualDocument* visualDocument = m_formOwner->GetVisualDocument();
-	//clear all controls 
+	//detach wx widgets first (while the column controls are still alive)
 	for (unsigned int idx = 0; idx < GetChildCount(); idx++) {
 		ibValueFrame* childColumn = GetChild(idx);
 		wxASSERT(childColumn);
@@ -101,14 +98,9 @@ void ibValueModelTableBox::CreateColumnCollection(ibDataViewCtrl* dataViewCtrl)
 			wxASSERT(visualView);
 			visualView->RemoveControl(childColumn, this);
 		}
-
-		RemoveChild(childColumn);
-
-		childColumn->SetParent(nullptr);
-		childColumn->DecrRef();
 	}
 
-	//clear all children
+	//clear all children — owning handles release the column controls (cascade)
 	RemoveAllChildren();
 
 	//clear all old columns
@@ -168,7 +160,7 @@ void ibValueModelTableBox::CreateTable(bool recreateModel) {
 
 		if (m_tableModel != nullptr) {
 			for (unsigned int idx = 0; idx < GetChildCount(); idx++) {
-				ibValueModelTableBoxColumn* columnTable = wxDynamicCast(GetChild(idx), ibValueModelTableBoxColumn);
+				ibValueModelTableBoxColumn* columnTable = dynamic_cast<ibValueModelTableBoxColumn*>(GetChild(idx));
 				if (columnTable != nullptr) {
 					ibValueModel::ibValueModelColumnCollection* columnData = m_tableModel->GetColumnCollection();
 					wxASSERT(columnData);
@@ -287,6 +279,8 @@ m_tableModel(nullptr), m_tableCurrentLine(nullptr),
 m_dataViewCreated(false), m_dataViewSelected(false),
 m_need_calculate_pos(false)
 {
+	m_members.Bind(this, &ibValueModelTableBox::FillControlMembers);
+
 	m_propertySource->SetValue(ibTypeDescription(g_valueTableCLSID));
 
 	//set default params
@@ -479,8 +473,19 @@ void ibValueModelTableBox::OnUpdated(wxObject* wxobject, ibFrontendWindow* wxpar
 	if (dataViewCtrl != nullptr) {
 
 		ibDataViewModel* dataViewOldModel = dataViewCtrl->GetModel();
-		ibDataViewModel* dataViewNewModel = m_tableModel != nullptr ?
-			m_tableModel->GetDataViewModel() : nullptr;
+		// Designer = compile + intellisense only.  Form-editor preview
+		// must not associate the runtime data model with the control —
+		// AssociateModel arms PagedBootstrap, which would issue SQL
+		// against a metadata table that doesn't exist yet (new Catalog /
+		// Document being designed) or that the Designer session has no
+		// runtime to query against.  Columns in designer are rendered
+		// from child ibValueModelTableBoxColumn controls (see
+		// CreateColumnCollection's own DesignerMode gate); header /
+		// footer dimensions below operate on dataViewCtrl directly, no
+		// model needed.
+		ibDataViewModel* dataViewNewModel =
+			(m_tableModel != nullptr && !appData->DesignerMode())
+			? m_tableModel->GetDataViewModel() : nullptr;
 
 		if (dataViewNewModel != dataViewOldModel) {
 			// Fresh control attaching to an existing model (form rebuild
@@ -683,25 +688,23 @@ enum prop {
 	eCurrentRow,
 };
 
-ibMetaData* ibValueModelTableBox::GetMetaData() const
+const ibMetaData* ibValueModelTableBox::GetMetaData() const
 {
 	return m_formOwner != nullptr ?
 		m_formOwner->GetMetaData() : nullptr;
 }
 
-void ibValueModelTableBox::PrepareNames() const
+void ibValueModelTableBox::FillControlMembers(ibMemberTable& helper) const
 {
-	ibValueFrame::PrepareNames();
-
-	m_methodHelper->AppendProp(wxT("Value"), eTableValue, eControl);
-	m_methodHelper->AppendProp(wxT("CurrentRow"), eCurrentRow, eControl);
+	helper.AppendProp(wxT("Value"), eTableValue, eControl);
+	helper.AppendProp(wxT("CurrentRow"), eCurrentRow, eControl);
 }
 
 bool ibValueModelTableBox::SetPropVal(const long lPropNum, const ibValue& varPropVal)
 {
-	const long lPropAlias = m_methodHelper->GetPropAlias(lPropNum); bool refreshColumn = false;
+	const long lPropAlias = m_members.GetPropAlias(lPropNum); bool refreshColumn = false;
 	if (lPropAlias == eControl) {
-		const long lPropData = m_methodHelper->GetPropData(lPropNum);
+		const long lPropData = m_members.GetPropData(lPropNum);
 		if (lPropData == eTableValue) {
 			m_tableModel = varPropVal.ConvertToType<ibValueModelTableBase>();
 			m_tableCurrentLine.Reset();
@@ -732,9 +735,9 @@ bool ibValueModelTableBox::SetPropVal(const long lPropNum, const ibValue& varPro
 
 bool ibValueModelTableBox::GetPropVal(const long lPropNum, ibValue& pvarPropVal)
 {
-	const long lPropAlias = m_methodHelper->GetPropAlias(lPropNum);
+	const long lPropAlias = m_members.GetPropAlias(lPropNum);
 	if (lPropAlias == eControl) {
-		const long lPropData = m_methodHelper->GetPropData(lPropNum);
+		const long lPropData = m_members.GetPropData(lPropNum);
 		if (lPropData == eTableValue) {
 			pvarPropVal = m_tableModel;
 			return true;

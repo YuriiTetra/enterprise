@@ -6,7 +6,7 @@
 #include "backend/metaCollection/table/metaTableObject.h"
 
 class BACKEND_API ibValueTabularSectionDataObjectBase : public ibValueModelRamTableBase {
-	wxDECLARE_ABSTRACT_CLASS(ibValueTabularSectionDataObjectBase);
+	public:
 private:
 
 	enum Func {
@@ -39,7 +39,7 @@ public:
 	virtual ibValueModelReturnLine* GetRowAt(const ibDataViewItem& line) {
 		if (!line.IsOk())
 			return nullptr;
-		return ibValue::CreateAndPrepareValueRef<ibValueTabularSectionDataObjectReturnLine>(this, line);
+		return new ibValueTabularSectionDataObjectReturnLine(this, line);
 	}
 
 	virtual bool HasDefaultCompare() const override { return false; }
@@ -68,11 +68,9 @@ public:
 	}
 
 	class ibValueTabularSectionDataObjectColumnCollection : public ibValueModelTableBase::ibValueModelColumnCollection {
-		wxDECLARE_DYNAMIC_CLASS(ibValueTabularSectionDataObjectColumnCollection);
 	public:
 		class ibValueTabularSectionColumnInfo : public ibValueModelTableBase::ibValueModelColumnCollection::ibValueModelColumnInfo {
-			wxDECLARE_DYNAMIC_CLASS(ibValueTabularSectionColumnInfo);
-		public:
+	public:
 
 			virtual unsigned int GetColumnID() const { return m_metaAttribute->GetMetaID(); }
 			virtual wxString GetColumnName() const { return m_metaAttribute->GetName(); }
@@ -118,28 +116,22 @@ public:
 
 		ibValueTabularSectionDataObjectBase* m_ownerTable;
 		std::map<ibMetaID, ibValuePtr<ibValueTabularSectionColumnInfo>> m_listColumnInfo;
-		ibValueMethodHelper* m_methodHelper;
 	};
 
 	class ibValueTabularSectionDataObjectReturnLine : public ibValueModelReturnLine {
-		wxDECLARE_DYNAMIC_CLASS(ibValueTabularSectionDataObjectReturnLine);
 	public:
 
 		ibValueTabularSectionDataObjectReturnLine(ibValueTabularSectionDataObjectBase* ownerTable = nullptr, const ibDataViewItem& line = ibDataViewItem(nullptr));
 		virtual ~ibValueTabularSectionDataObjectReturnLine();
 
 		virtual ibValueModelTableBase* GetOwnerModel() const { return m_ownerTable; }
-		virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-			//PrepareNames(); 
-			return m_methodHelper;
-		}
 
-		virtual void PrepareNames() const;
+		void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 		virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal); //setting attribute
 		virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal); //attribute value
 
-		//Get ref class 
+		//Get ref class
 		virtual ibClassID GetClassType() const;
 
 		virtual wxString GetClassName() const;
@@ -148,7 +140,6 @@ public:
 		friend class ibValueTabularSectionDataObjectBase;
 	private:
 		ibValueTabularSectionDataObjectBase* m_ownerTable;
-		ibValueMethodHelper* m_methodHelper;
 	};
 
 	const ibValueMetaObjectTableData* GetMetaObject() const { return m_metaTable; }
@@ -167,13 +158,15 @@ public:
 	ibValueTabularSectionDataObjectBase() :
 		m_objectValue(nullptr), m_metaTable(nullptr),
 		m_recordColumnCollection(nullptr),
-		m_methodHelper(nullptr), m_readOnly(false) {
+		m_readOnly(false) {
+		m_members.Bind(this, &ibValueTabularSectionDataObjectBase::FillMembers);
 	}
 
 	ibValueTabularSectionDataObjectBase(ibValueDataObject* objectValue, const ibValueMetaObjectTableData* tableObject, bool readOnly = false) :
 		m_objectValue(objectValue), m_metaTable(tableObject),
-		m_recordColumnCollection(ibValue::CreateAndPrepareValueRef<ibValueTabularSectionDataObjectColumnCollection>(this)),
-		m_methodHelper(new ibValueMethodHelper()), m_readOnly(readOnly) {
+		m_recordColumnCollection(new ibValueTabularSectionDataObjectColumnCollection(this)),
+		m_readOnly(readOnly) {
+		m_members.Bind(this, &ibValueTabularSectionDataObjectBase::FillMembers);
 		for (const auto object : tableObject->GetGenericAttributeArrayObject()) {
 			m_filterRow.AppendFilter(
 				object->GetMetaID(),
@@ -187,7 +180,7 @@ public:
 		}
 	}
 
-	virtual ~ibValueTabularSectionDataObjectBase() { wxDELETE(m_methodHelper); }
+	virtual ~ibValueTabularSectionDataObjectBase() {}
 
 	virtual void GetValueByRow(wxVariant& variant,
 		const ibDataViewItem& row, unsigned int col) const override;
@@ -223,12 +216,7 @@ public:
 	//*                              Support methods                             *
 	//****************************************************************************
 
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return m_methodHelper;
-	}
-
-	virtual void PrepareNames() const;                             // this method is automatically called to initialize attribute and method names
+	void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 	virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);       // method call
 
 	//array
@@ -244,7 +232,7 @@ public:
 	// → BuildVisibleView for filter+sort consistency with the GUI).
 	// GetEmptyRow yields the typed skeleton for IntelliSense type hint.
 	virtual ibValue GetEmptyRow() override {
-		return ibValue::CreateAndPrepareValueRef<ibValueTabularSectionDataObjectReturnLine>(this, ibDataViewItem(nullptr));
+		return new ibValueTabularSectionDataObjectReturnLine(this, ibDataViewItem(nullptr));
 	}
 
 protected:
@@ -255,12 +243,10 @@ protected:
 
 	ibValueDataObject* m_objectValue;
 	ibValuePtr<ibValueTabularSectionDataObjectColumnCollection> m_recordColumnCollection;
-	ibValueMethodHelper* m_methodHelper;
 };
 
 class BACKEND_API ibValueTabularSectionDataObject : public ibValueTabularSectionDataObjectBase {
-	wxDECLARE_DYNAMIC_CLASS(ibValueTabularSectionDataObject);
-public:
+	public:
 
 	ibValueTabularSectionDataObject();
 	ibValueTabularSectionDataObject(class ibValueRecordDataObject* recordObject, const ibValueMetaObjectTableData* tableObject);
@@ -268,8 +254,7 @@ public:
 };
 
 class BACKEND_API ibValueTabularSectionDataObjectRef : public ibValueTabularSectionDataObjectBase {
-	wxDECLARE_DYNAMIC_CLASS(ibValueTabularSectionDataObjectRef);
-public:
+	public:
 
 	bool IsReadAfter() const { return m_readAfter; }
 

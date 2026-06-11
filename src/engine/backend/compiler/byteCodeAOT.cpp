@@ -34,6 +34,7 @@
 // successful Deserialize).
 
 #include "backend/compiler/byteCode.h"
+#include "backend/query/queryAst.h"      // ibQueryAstExpr — m_lambdaExprAst payload (v14)
 #include "backend/fileSystem/fs.h"
 
 namespace {
@@ -95,7 +96,19 @@ constexpr uint32_t kAOTMagic         = 0x31434250u; // 'PBC1' little-endian
 // integers, so a v9 reader loading a v10-written blob (or vice versa)
 // would dispatch the wrong handler on every post-shift opcode. Bump
 // rejects v9 → safe recompile + repopulate. Payload layout unchanged.
-constexpr uint16_t kAOTFormatVersion = 10;
+// v13 (2026-06-02): bind-kind access opcodes added before OPER_END
+// (OPER_GET/SET_EXTERN, OPER_GET/SET_SCOPE, OPER_GET/SET_CONTEXT). OPER_END
+// shifts +6, so TYPE_DELTA1 (= OPER_END+1) and every typed-op opcode
+// (oper + k*DELTA) shift in numeric value; ContextProp also now emits
+// OPER_GET_SCOPE/SET_SCOPE instead of OPER_GET_A/SET_A. v12 blobs persist raw
+// m_numOper integers → a v12 reader would dispatch the wrong handler on every
+// shifted opcode. Bump rejects v12 → safe recompile + repopulate.
+// v14 (2026-06-11): ibByteFunction gained m_lambdaExprAst — the recorded lambda
+// body as the L4 query AST (the LINQ-pushdown input). It IS serialised: AOT
+// hits are the production norm, so an unserialised AST would silently kill the
+// pushdown on every cached module. v13 blobs lack the trailing presence byte →
+// bump rejects them → safe recompile + repopulate.
+constexpr uint16_t kAOTFormatVersion = 14;
 constexpr uint16_t kAOTFlagPortable  = 0x0001;       // unused — host-endian today
 
 // Sentinel for an over-large collection — guards Deserialize against
@@ -185,7 +198,7 @@ bool WriteConstValue(ibWriterMemory& w, const ibValue& v) {
 		w.w_s64((int64_t)v.m_dData);
 		return true;
 	case ibValueTypes::TYPE_STRING:
-		w.w_stringZ(v.m_sData);
+		w.w_stringZ(v.GetString());
 		return true;
 	default:
 		return false; // TYPE_REFFER / TYPE_VALUE / TYPE_ENUM / TYPE_OLE
@@ -195,40 +208,53 @@ bool WriteConstValue(ibWriterMemory& w, const ibValue& v) {
 bool ReadConstValue(const ibReaderMemory& r, ibValue& v) {
 	const uint8_t tc = r.r_u8();
 	v.SetType((ibValueTypes)tc);
-	// Const-pool entries are compile-time literals — readonly by
-	// definition. Without this flag, runtime arg-binding on a literal
-	// arg falls through to the ref-binding branch (procUnit.cpp:828)
-	// and triggers "Attempt to write to a constant value" when the
-	// callee writes through the slot. Fresh-compile path sets this on
-	// every const it pushes; AOT format doesn't carry the bit (it's
-	// implicit for the whole list).
-	v.m_bReadOnly = true;
+
+	// Write the payload while the value is still mutable, THEN mark it
+	// readonly. Order matters since Phase 2: the string payload moved into
+	// the union and SetString() now Resets the value first to free the old
+	// ibString — and Reset() rejects writes to a readonly value. Setting the
+	// flag before SetString() therefore threw "Attempt to assign a value to a
+	// write-denied variable" for every string const (AOT cache load of any
+	// module with a string literal). The non-string cases write members
+	// directly and were unaffected, which is why only strings tripped it.
+	bool ok = true;
 	switch ((ibValueTypes)tc) {
 	case ibValueTypes::TYPE_EMPTY:
 	case ibValueTypes::TYPE_NULL:
-		return true;
+		break;
 	case ibValueTypes::TYPE_BOOLEAN:
 		v.m_bData = (r.r_u8() != 0);
-		return true;
+		break;
 	case ibValueTypes::TYPE_NUMBER: {
 		const uint32_t len = r.r_u32();
-		if (len > kAOTSanityMax) return false;
+		if (len > kAOTSanityMax) { ok = false; break; }
 		wxMemoryBuffer buf;
 		if (len > 0) {
 			r.r(buf.GetAppendBuf(len), (int)len);
 			buf.UngetAppendBuf(len);
 		}
-		return v.m_fData.SetBuffer(buf);
+		ok = v.m_fData.SetBuffer(buf);
+		break;
 	}
 	case ibValueTypes::TYPE_DATE:
 		v.m_dData = (wxLongLong_t)r.r_s64();
-		return true;
+		break;
 	case ibValueTypes::TYPE_STRING:
-		r.r_stringZ(v.m_sData);
-		return true;
+		v.SetString(r.r_stringZ());
+		break;
 	default:
-		return false;
+		ok = false;
+		break;
 	}
+
+	// Const-pool entries are compile-time literals — readonly by definition.
+	// Without this flag, runtime arg-binding on a literal arg falls through to
+	// the ref-binding branch (procUnit.cpp:828) and triggers "Attempt to write
+	// to a constant value" when the callee writes through the slot. Fresh-
+	// compile path sets this on every const it pushes; the AOT format doesn't
+	// carry the bit (it's implicit for the whole list).
+	v.m_bReadOnly = true;
+	return ok;
 }
 
 bool WriteVarInfo(ibWriterMemory& w, const ibByteCode::ibByteCodeVarInfo& v) {
@@ -269,6 +295,124 @@ void ReadParam(const ibReaderMemory& r, ibByteCode::ibByteParam& p) {
 	r.r_stringZ(p.m_defaultValue.m_strType);
 }
 
+// --- m_lambdaExprAst (L4-2) — the recorded lambda body as the L4 query AST.
+// The recorder's subset is closed and SMALL (Column / Literal / Param / Arith /
+// Compare / Logical / Not; literals are primitives only), so the encoding is a
+// straight recursive kind-tagged dump. A node outside the subset (future
+// recorder growth before this list is extended) makes the AST UNSERIALISABLE —
+// the writer then stores "absent" (presence byte 0): the cached module loses
+// only the pushdown (RAM floor), never correctness. The reader validates kinds
+// and depth; any mismatch fails the whole load → ordinary cache miss.
+
+constexpr uint32_t kAOTMaxAstDepth = 256;
+
+bool AstSerializable(const ibQueryAstExpr& e, uint32_t depth = 0)
+{
+	if (depth > kAOTMaxAstDepth) return false;
+	switch (e.m_kind) {
+	case ibQueryAstExprKind::Column:
+	case ibQueryAstExprKind::Param:
+		return true;
+	case ibQueryAstExprKind::Literal:
+		switch (e.m_literal.GetType()) {
+		case ibValueTypes::TYPE_EMPTY: case ibValueTypes::TYPE_NULL:
+		case ibValueTypes::TYPE_BOOLEAN: case ibValueTypes::TYPE_NUMBER:
+		case ibValueTypes::TYPE_DATE: case ibValueTypes::TYPE_STRING:
+			return true;
+		default:
+			return false;
+		}
+	case ibQueryAstExprKind::Not:
+		return e.m_lhs && AstSerializable(*e.m_lhs, depth + 1);
+	case ibQueryAstExprKind::Arith:
+	case ibQueryAstExprKind::Compare:
+	case ibQueryAstExprKind::Logical:
+		return e.m_lhs && e.m_rhs
+			&& AstSerializable(*e.m_lhs, depth + 1) && AstSerializable(*e.m_rhs, depth + 1);
+	default:
+		return false;
+	}
+}
+
+void WriteLambdaAst(ibWriterMemory& w, const ibQueryAstExpr& e)
+{
+	w.w_u8((uint8_t)e.m_kind);
+	w.w_u32(e.m_line);
+	w.w_u32(e.m_col);
+	switch (e.m_kind) {
+	case ibQueryAstExprKind::Column:
+		w.w_u32((uint32_t)e.m_path.size());
+		for (const wxString& s : e.m_path) w.w_stringZ(s);
+		break;
+	case ibQueryAstExprKind::Literal:
+		WriteConstValue(w, e.m_literal);
+		break;
+	case ibQueryAstExprKind::Param:
+		w.w_stringZ(e.m_paramName);
+		break;
+	case ibQueryAstExprKind::Not:
+		WriteLambdaAst(w, *e.m_lhs);
+		break;
+	case ibQueryAstExprKind::Arith:
+		w.w_u8((uint8_t)e.m_arith);
+		WriteLambdaAst(w, *e.m_lhs); WriteLambdaAst(w, *e.m_rhs);
+		break;
+	case ibQueryAstExprKind::Compare:
+		w.w_u8((uint8_t)e.m_cmp);
+		WriteLambdaAst(w, *e.m_lhs); WriteLambdaAst(w, *e.m_rhs);
+		break;
+	case ibQueryAstExprKind::Logical:
+		w.w_u8(e.m_isOr ? 1 : 0);
+		WriteLambdaAst(w, *e.m_lhs); WriteLambdaAst(w, *e.m_rhs);
+		break;
+	default:
+		break;   // unreachable — AstSerializable gates the call
+	}
+}
+
+ibQueryAstExprPtr ReadLambdaAst(const ibReaderMemory& r, uint32_t depth = 0)
+{
+	if (depth > kAOTMaxAstDepth) return nullptr;
+	const ibQueryAstExprKind kind = (ibQueryAstExprKind)r.r_u8();
+	ibQueryAstExprPtr e = ibQueryAstExpr::Make(kind);
+	e->m_line = r.r_u32();
+	e->m_col  = r.r_u32();
+	switch (kind) {
+	case ibQueryAstExprKind::Column: {
+		const uint32_t count = r.r_u32();
+		if (count == 0 || count > kAOTSanityMax) return nullptr;
+		e->m_path.resize(count);
+		for (uint32_t i = 0; i < count; ++i) r.r_stringZ(e->m_path[i]);
+		return e;
+	}
+	case ibQueryAstExprKind::Literal:
+		return ReadConstValue(r, e->m_literal) ? e : nullptr;
+	case ibQueryAstExprKind::Param:
+		r.r_stringZ(e->m_paramName);
+		return e->m_paramName.IsEmpty() ? nullptr : e;
+	case ibQueryAstExprKind::Not:
+		e->m_lhs = ReadLambdaAst(r, depth + 1);
+		return e->m_lhs ? e : nullptr;
+	case ibQueryAstExprKind::Arith:
+		e->m_arith = (ibQueryArithOp)r.r_u8();
+		e->m_lhs = ReadLambdaAst(r, depth + 1);
+		e->m_rhs = e->m_lhs ? ReadLambdaAst(r, depth + 1) : nullptr;
+		return e->m_rhs ? e : nullptr;
+	case ibQueryAstExprKind::Compare:
+		e->m_cmp = (ibQueryCompareOp)r.r_u8();
+		e->m_lhs = ReadLambdaAst(r, depth + 1);
+		e->m_rhs = e->m_lhs ? ReadLambdaAst(r, depth + 1) : nullptr;
+		return e->m_rhs ? e : nullptr;
+	case ibQueryAstExprKind::Logical:
+		e->m_isOr = (r.r_u8() != 0);
+		e->m_lhs = ReadLambdaAst(r, depth + 1);
+		e->m_rhs = e->m_lhs ? ReadLambdaAst(r, depth + 1) : nullptr;
+		return e->m_rhs ? e : nullptr;
+	default:
+		return nullptr;   // unknown kind — corrupt / future format
+	}
+}
+
 bool WriteFunction(ibWriterMemory& w, const ibByteCode::ibByteFunction& f) {
 	w.w_s32((int32_t)f.m_lCodeParamCount);
 	w.w_s32((int32_t)f.m_lCodeLine);
@@ -295,6 +439,14 @@ bool WriteFunction(ibWriterMemory& w, const ibByteCode::ibByteFunction& f) {
 	w.w_u32((uint32_t)f.m_listLocals.size());
 	for (const auto& v : f.m_listLocals)
 		WriteVarInfo(w, v);
+
+	// m_lambdaExprAst (v14) — presence byte + the recursive dump. An AST outside
+	// the serialisable subset stores as ABSENT: the cached module degrades to the
+	// RAM pipeline for that lambda, correctness unaffected.
+	const bool hasAst = f.m_lambdaExprAst && AstSerializable(*f.m_lambdaExprAst);
+	w.w_u8(hasAst ? 1 : 0);
+	if (hasAst)
+		WriteLambdaAst(w, *f.m_lambdaExprAst);
 
 	return true;
 }
@@ -327,6 +479,13 @@ bool ReadFunction(const ibReaderMemory& r, ibByteCode::ibByteFunction& f) {
 	f.m_listLocals.resize(localsCount);
 	for (uint32_t i = 0; i < localsCount; ++i)
 		ReadVarInfo(r, f.m_listLocals[i]);
+
+	// m_lambdaExprAst (v14) — presence byte + the recursive dump; a malformed
+	// payload fails the whole load (ordinary cache miss → recompile).
+	if (r.r_u8() != 0) {
+		f.m_lambdaExprAst = ReadLambdaAst(r);
+		if (!f.m_lambdaExprAst) return false;
+	}
 
 	return true;
 }

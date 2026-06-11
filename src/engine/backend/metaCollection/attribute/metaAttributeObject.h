@@ -4,13 +4,16 @@
 #include "backend/metaCollection/metaObject.h"
 #include "backend/backend_type.h"
 #include "backend/objCtorDefs.h"
+#include "backend/query/queryColumn.h"   // ibBackendQueryColumn — an attribute IS a query column
 
 #include "metaAttributeObjectEnum.h"
 
+class ibDatabaseResultSet;   // L1 cursor — only named as a pointer in GetBinaryData below
+class ibPreparedStatement;   // L1 prepared statement — only named as a pointer in SetBinaryData below
+
 class BACKEND_API ibValueMetaObjectAttributeBase :
-	public ibValueMetaObject, public ibBackendTypeConfigFactory {
-	wxDECLARE_ABSTRACT_CLASS(ibValueMetaObjectAttributeBase);
-public:
+	public ibValueMetaObject, public ibBackendTypeConfigFactory, public ibBackendQueryColumn {
+	public:
 
 	enum ibFieldTypes {
 		ibFieldTypes_Empty = 0,
@@ -131,14 +134,9 @@ public:
 	//process default query
 	static int ProcessAttribute(const wxString& tableName, const ibValueMetaObjectAttributeBase* srcAttr, const ibValueMetaObjectAttributeBase* dstAttr);
 
-	//set value attribute 
-	static void SetValueAttribute(const ibValueMetaObjectAttributeBase* attribute, const ibValue& cValue, class ibPreparedStatement* statement, int& position);
-	static void SetValueAttribute(const ibValueMetaObjectAttributeBase* attribute, const ibValue& cValue, class ibPreparedStatement* statement);
-
-	//get value from attribute
-	static bool GetValueAttribute(const wxString& fieldName, const ibFieldTypes& fldType, const ibValueMetaObjectAttributeBase* metaAttr, ibValue& retValue, class ibDatabaseResultSet* resultSet, bool createData = true);
-	static bool GetValueAttribute(const wxString& fieldName, const ibValueMetaObjectAttributeBase* attribute, ibValue& retValue, class ibDatabaseResultSet* resultSet, bool createData = true);
-	static bool GetValueAttribute(const ibValueMetaObjectAttributeBase* attribute, ibValue& retValue, class ibDatabaseResultSet* resultSet, bool createData = true);
+	// (Value assembly from / binding to a DB row moved to ibDbTableProvider::GetValueAttribute /
+	// ::SetValueAttribute — it is a DB provider concern, not the metadata attribute's. See
+	// query/dbTableProvider.h.)
 
 	//store value 
 	static void SetBinaryData(const ibValueMetaObjectAttributeBase* metaAttr, const ibReaderMemory& reader, ibPreparedStatement* statement,
@@ -175,7 +173,33 @@ public:
 
 	virtual wxString GetFieldNameDB() const { return wxString::Format(wxT("fld%i"), m_metaId); }
 
-	//get sql type for db 
+	// --- ibBackendQueryColumn: an attribute IS a query column ------------
+	// GetTypeDesc() is the column's typed accessor — but it is ALSO declared by the
+	// other base (ibBackendTypeFactory). Re-declaring it here as one pure virtual
+	// makes a single overrider for BOTH bases and resolves the otherwise-ambiguous
+	// name (C2385); each concrete attribute supplies the body, reused as-is.
+	// GetName likewise resolves the ambiguity between ibValueMetaObject::GetName and
+	// the column's.
+	virtual ibTypeDescription& GetTypeDesc() const override = 0;
+	virtual wxString GetName() const override         { return ibValueMetaObject::GetName(); }
+	virtual wxString GetPhysicalName() const override { return GetFieldNameDB(); }
+	// The column's model/read id — for a DB attribute it IS the metaID (RAM tables key
+	// their rows by it; the DB path keys its fields off the same id via GetFieldNameDB).
+	virtual ibMetaID GetModelID() const override      { return GetMetaID(); }
+
+	// Authoritative physical-field list — the attribute's OWN field machinery, so the DB
+	// IR builder (sort / group-by) reads it straight off the column with no ResolveAttribute,
+	// byte-identical to the former GetSQLFieldData path it replaced.
+	virtual std::vector<wxString> GetSQLFields() const override {
+		std::vector<wxString> out;
+		for (auto& field : GetSQLFieldData(this))
+			out.push_back(field.m_type == ibFieldTypes_Reference
+			              ? field.m_field.m_fieldRefName.m_fieldRefName
+			              : field.m_field.m_fieldName);
+		return out;
+	}
+
+	//get sql type for db
 	virtual wxString GetSQLTypeObject(const ibClassID& clsid) const;
 
 	//check if attribute is fill 
@@ -185,7 +209,8 @@ public:
 	virtual ibSelectMode GetSelectMode() const { return ibSelectMode::ibSelectMode_Items; }
 
 	//get metaData
-	virtual ibMetaData* GetMetaData() const { return m_metaData; }
+	virtual const ibMetaData* GetMetaData() const { return m_metaData; }
+	virtual ibMetaData* GetMetaData() { return m_metaData; }
 
 	//events:
 	virtual bool OnCreateMetaObject(ibMetaData* metaData, int flags);
@@ -204,8 +229,7 @@ protected:
 };
 
 class BACKEND_API ibValueMetaObjectAttribute : public ibValueMetaObjectAttributeBase {
-	wxDECLARE_DYNAMIC_CLASS(ibValueMetaObjectAttribute);
-public:
+	public:
 
 	ibValueMetaObjectAttribute(const ibValueTypes& valType = ibValueTypes::TYPE_STRING) :
 		ibValueMetaObjectAttributeBase()
@@ -252,7 +276,7 @@ private:
 };
 
 class BACKEND_API ibValueMetaObjectAttributePredefined : public ibValueMetaObjectAttributeBase {
-	wxDECLARE_DYNAMIC_CLASS(ibValueMetaObjectAttributePredefined);
+	public:
 private:
 
 	ibValueMetaObjectAttributePredefined(const wxString& name, const wxString& synonym, const wxString& comment, bool fillCheck, const ibValue& defValue, ibItemMode itemMode, ibSelectMode selectMode)

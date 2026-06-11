@@ -25,6 +25,10 @@
 
 #include "../../3rdparty/cpp-httplib/httplib.h"
 #include "wfrontend.h"
+#include "../../3rdparty/nlohmann/json.hpp"
+#include "backend/backend_exception.h"
+#include "backend/databaseLayer/databaseLayerException.h"
+#include "frontend/diagnostics/oesConsole.h"
 
 #if defined(_WIN32)
 #	include <winsock2.h>
@@ -389,15 +393,15 @@ int main(int argc, char** argv)
 #endif
 	const CmdArgs args = ParseArgs(argc, argv);
 
-	// wx needs bootstrapping for appData's internals (wxString, wxSocket,
-	// wxLog, wxLocale, image handlers, ...). Wrap the whole runtime in a
-	// wxInitializer so Cleanup runs even on early exit.
-	wxInitializer wxInit(argc, argv);
-	if (!wxInit.IsOk()) {
+	// wxInitializer + wxSocketBase::Initialize + ibCrashGuard::Install
+	// in one shot. wes is headless — no wxApp, faults need the persistent
+	// minidump + std::set_terminate + signal handlers from crashGuard so
+	// they don't disappear silently with the process.
+	ibOesConsoleBoot boot(wxT("wenterprise-server"), argc, argv);
+	if (!boot.IsOk()) {
 		std::cerr << "wxWidgets failed to initialise" << std::endl;
 		return 1;
 	}
-	wxSocketBase::Initialize();
 
 	// Bind the HTTP server FIRST so we know the real port before the
 	// backend comes up — InitBackend's call chain creates the
@@ -437,6 +441,53 @@ int main(int argc, char** argv)
 	// doesn't exist.
 	svr.set_read_timeout(5);
 	svr.set_write_timeout(5);
+
+	// Top-level exception handler — catches anything that escapes one
+	// of the per-route lambdas below. Pre-2026-05-26 the lambdas had
+	// no defensive wrap and an ibBackendException unwinding from a
+	// session-bound script handler crashed the wes process (cpp-httplib
+	// swallows raw escapes but our session state is left half-torn).
+	// With ThrowDatabaseException now actually throwing, the surface
+	// of paths that can reach here grew — every DB call inside a
+	// handler can now produce a structured exception. We surface a
+	// JSON 500 with the most-specific kind/code we can extract so
+	// client diagnostics (and admin dashboards) see something useful
+	// instead of the generic empty cpp-httplib body.
+	svr.set_exception_handler([](const httplib::Request& /*req*/,
+	                              httplib::Response& res,
+	                              std::exception_ptr ep) {
+		std::string body;
+		try { std::rethrow_exception(ep); }
+		catch (const ibDatabaseLayerException& e) {
+			body = std::string("{\"error\":\"database\",\"code\":")
+				+ std::to_string(e.GetDriverErrorCode())
+				+ ",\"sqlstate\":\"" + e.GetSqlState().ToUTF8().data()
+				+ "\",\"retryable\":" + (e.IsRetryable() ? "true" : "false")
+				+ ",\"message\":" + nlohmann::json(e.GetErrorDescription().ToUTF8().data()).dump()
+				+ "}";
+		}
+		catch (const ibBackendDatabaseException& e) {
+			body = std::string("{\"error\":\"database\",\"retryable\":")
+				+ (e.IsRetryable() ? "true" : "false")
+				+ ",\"message\":" + nlohmann::json(e.GetErrorDescription().ToUTF8().data()).dump()
+				+ "}";
+		}
+		catch (const ibBackendException& e) {
+			body = std::string("{\"error\":\"backend\",\"message\":")
+				+ nlohmann::json(e.GetErrorDescription().ToUTF8().data()).dump()
+				+ "}";
+		}
+		catch (const std::exception& e) {
+			body = std::string("{\"error\":\"internal\",\"message\":")
+				+ nlohmann::json(e.what()).dump()
+				+ "}";
+		}
+		catch (...) {
+			body = "{\"error\":\"unknown\"}";
+		}
+		res.status = 500;
+		res.set_content(body, "application/json; charset=utf-8");
+	});
 
 	svr.Get(prefix + "/", [prefix](const httplib::Request& req, httplib::Response& res) {
 		// Windows IPv6-first "localhost" fallback adds ~200ms cold
@@ -877,6 +928,26 @@ int main(int argc, char** argv)
 			const bool ok = wfrontendReloadSessionByGuid(guid);
 			res.status = ok ? 202 : 500;
 			res.set_content(ok ? "queued\n" : "failed\n", "text/plain");
+		});
+
+	// GET /admin/locks — JSON array of held sys_lock rows cluster-wide.
+	// One entry per held lock; see wfrontendLocksJSON shape. Cheap to
+	// call (single SELECT, no joins).
+	svr.Get(prefix + "/admin/locks",
+		[](const httplib::Request&, httplib::Response& res) {
+			res.set_content(wfrontendLocksJSON(), "application/json");
+		});
+
+	// DELETE /admin/locks/<lockGuid> — admin force-release for the
+	// named row. Use when a session went zombie before releasing, or
+	// the user can't unblock through the normal UI. Returns 200 on
+	// success, 500 on error (already-gone is success — best-effort).
+	svr.Delete(prefix + R"(/admin/locks/([0-9a-fA-F\-]+))",
+		[](const httplib::Request& req, httplib::Response& res) {
+			const std::string guid = req.matches[1].str();
+			const bool ok = wfrontendForceReleaseLockByGuid(guid);
+			res.status = ok ? 200 : 500;
+			res.set_content(ok ? "released\n" : "failed\n", "text/plain");
 		});
 
 	std::cout << wfrontendVersion() << std::endl;

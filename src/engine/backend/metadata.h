@@ -4,14 +4,17 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <functional>
 #include <vector>
 
 #include "backend/moduleManager/moduleManager.h"
 #include "backend/value_ptr.h"
+#include "backend/ctorRegistry.h"
 
 ///////////////////////////////////////////////////////////////////////////////
 class BACKEND_API ibBackendMetadataTree;
 class BACKEND_API ibValueMetaObjectCommonModule;
+class BACKEND_API ibValueMetaObjectModuleBase;
 class BACKEND_API ibValueMetaObjectGenericData;
 class BACKEND_API ibValueMetaObjectFormBase;
 ///////////////////////////////////////////////////////////////////////////////
@@ -29,7 +32,13 @@ public:
 	bool RenameCommonModule(ibValueMetaObjectCommonModule* commonModule, const wxString& newName);
 	bool RemoveCommonModule(ibValueMetaObjectCommonModule* commonModule);
 
-	const std::vector<ibValueMetaObjectCommonModule*>& GetInitModules() const { return m_initModules; }
+	// Drop every registration — used on the RunDatabase bail-out path, where
+	// some common modules already registered (in OnBeforeRunMetaObject) before the
+	// failure, CloseDatabase won't run (m_configOpened stays false), and the next
+	// load rebuilds the metaobject tree out from under these raw pointers.
+	void Clear() { m_initModules.clear(); }
+
+	const std::vector<ibValueMetaObjectCommonModule*>& GetCompileModules() const { return m_initModules; }
 
 private:
 	std::vector<ibValueMetaObjectCommonModule*> m_initModules;
@@ -87,8 +96,29 @@ private:
 // changing the API contract for callers.
 class BACKEND_API ibCompileValueCache {
 public:
+	// Designer-own module manager (the pre-session-split config-level mm the
+	// Designer lost when runtime moved into per-session ibSession::m_root). Held
+	// here so the editor reads common-module units + named context from a manager
+	// that tracks the CURRENT designer state, decoupled from the runtime session's
+	// CreateMainModule timing. Owned by this cache. See project_common_module_designer_cache.
+	explicit ibCompileValueCache(ibValueModuleManagerDesigner* moduleManager = nullptr);
+
+	// Out-of-line (metadata.cpp): the ibValuePtr<ibValueModuleManagerDesigner>
+	// assign/convert needs the COMPLETE designer type for its ref-count static_cast.
+	ibValueModuleManagerDesigner* GetModuleManager() const;
+	// Rebind the designer manager — driven by RunDatabase (fresh metaobject) /
+	// CloseDatabase (nullptr). The manager binds to the current common metaobject;
+	// holding one across a config reload would dangle (the old metaobject is freed).
+	void SetModuleManager(ibValueModuleManagerDesigner* moduleManager);
+
 	bool AddCompileModule(const ibValueMetaObject* moduleObject, ibValue* object);
-	bool AddCompileModule(const ibValueMetaObject* moduleObject, ibDeferredForm deferred);
+	// Generalized deferred: the builder is Constructed lazily on first lookup.
+	// Forms wrap ibDeferredForm (needs the session root mm compiled). Common
+	// modules no longer use this path — they register into the designer-mgr
+	// directly via RuntimeRegisterCommonModule (see project_common_module_designer_cache).
+	// insert_or_assign semantics (a re-run replaces the prior builder + drops
+	// the built value).
+	bool AddCompileModule(const ibValueMetaObject* moduleObject, std::function<ibValue*()> builder);
 	bool RemoveCompileModule(const ibValueMetaObject* moduleObject);
 
 	// Mark a deferred entry as dirty — Designer calls this on form-edit
@@ -115,16 +145,22 @@ public:
 private:
 	struct ibCompileEntry {
 		ibValuePtr<ibValue>           m_value;     // built value; null if pending or invalidated
-		std::optional<ibDeferredForm> m_deferred;  // rebuilder; present for forms
+		std::function<ibValue*()>     m_deferred;  // rebuilder; set for lazy entries (forms / common modules)
 		bool                          m_constructing = false; // recursion guard for FindCompileModuleRef
 	};
 	mutable std::map<const ibValueMetaObject*, ibCompileEntry> m_cache;
+
+	// Designer-own module manager — owning handle (ibValuePtr: IncrRef on bind,
+	// DecrRef on cache destruction). Null until ibMetaDataConfigurationStorage
+	// wires one in. Designer-only type: holds its OWN common-module registry with
+	// compiled lightweight units, independent of the runtime managers.
+	ibValuePtr<ibValueModuleManagerDesigner> m_moduleManager;
 };
 
 ///////////////////////////////////////////////////////////////////////////////
 
 class BACKEND_API ibMetaData {
-	void DoGenerateNewID(ibMetaID& id, ibValueMetaObject* top) const;
+	void DoGenerateNewID(ibMetaID& id, const ibValueMetaObject* top) const;
 public:
 
 	ibMetaData() :
@@ -161,7 +197,8 @@ public:
 	virtual ibVersionID GetVersion() const = 0;
 
 	virtual wxString GetFileName() const { return wxEmptyString; }
-	virtual ibValueMetaObject* GetCommonMetaObject() const { return nullptr; }
+	virtual const ibValueMetaObject* GetCommonMetaObject() const { return nullptr; }
+	virtual ibValueMetaObject* GetCommonMetaObject() { return nullptr; }
 
 	//runtime support:
 	inline ibValue CreateObject(const ibClassID& clsid, ibValue** paParams = nullptr, const long lSizeArray = 0) const {
@@ -196,7 +233,7 @@ public:
 	}
 	template<typename T, typename... Args>
 	inline T* CreateAndConvertObjectValueRef(Args&&... args) const {
-		T* created_value = ibValue::CreateAndPrepareValueRef<T>(args...);
+		T* created_value = new T(args...);
 		if (!IsRegisterCtor(created_value->GetClassType())) {
 			wxDELETE(created_value);
 			wxASSERT_MSG(false, "CreateAndConvertObjectValueRef ret null!");
@@ -291,22 +328,40 @@ public:
 #pragma endregion
 #pragma region __filter_h__
 
-	//any
+	// Overload pair (Effective C++ Item 3): const this → const result, so the
+	// runtime (which reaches ibMetaData through a const handle) gets const
+	// meta-objects — they protect metadata from mutation exactly like the const
+	// ibMetaData handle does. non-const this → mutable, for designer /
+	// meta-internal edits. The protected FindObjectByFilter helper stays const
+	// and is shared by both; the const path just narrows its result.
 	template <typename _T1 = ibValueMetaObject, typename _T2>
-	_T1* FindAnyObjectByFilter(const _T2& id, const bool use_child_filter = false) const {
+	const _T1* FindAnyObjectByFilter(const _T2& id, const bool use_child_filter = false) const {
+		return FindObjectByFilter<_T2, ibValueMetaObject, _T1>(id, {}, use_child_filter);
+	}
+	template <typename _T1 = ibValueMetaObject, typename _T2>
+	_T1* FindAnyObjectByFilter(const _T2& id, const bool use_child_filter = false) {
 		return FindObjectByFilter<_T2, ibValueMetaObject, _T1>(id, {}, use_child_filter);
 	}
 
 	//any
 	template <typename _T1 = ibValueMetaObject, typename _T2>
-	_T1* FindAnyObjectByFilter(const _T2& id, const ibClassID& clsid, const bool use_child_filter = false) const {
+	const _T1* FindAnyObjectByFilter(const _T2& id, const ibClassID& clsid, const bool use_child_filter = false) const {
+		return FindObjectByFilter<_T2, ibValueMetaObject, _T1>(id, { clsid }, use_child_filter);
+	}
+	template <typename _T1 = ibValueMetaObject, typename _T2>
+	_T1* FindAnyObjectByFilter(const _T2& id, const ibClassID& clsid, const bool use_child_filter = false) {
 		return FindObjectByFilter<_T2, ibValueMetaObject, _T1>(id, { clsid }, use_child_filter);
 	}
 
 	//any
 	template <typename _T1 = ibValueMetaObject, typename _T2>
-	_T1* FindAnyObjectByFilter(const _T2& id,
+	const _T1* FindAnyObjectByFilter(const _T2& id,
 		const std::initializer_list<ibClassID> filter, const bool use_child_filter = false) const {
+		return FindObjectByFilter<_T2, ibValueMetaObject, ibValueMetaObject, _T1>(id, filter, use_child_filter);
+	}
+	template <typename _T1 = ibValueMetaObject, typename _T2>
+	_T1* FindAnyObjectByFilter(const _T2& id,
+		const std::initializer_list<ibClassID> filter, const bool use_child_filter = false) {
 		return FindObjectByFilter<_T2, ibValueMetaObject, ibValueMetaObject, _T1>(id, filter, use_child_filter);
 	}
 
@@ -377,8 +432,13 @@ protected:
 		return nullptr;
 	}
 
-#pragma endregion 
+#pragma endregion
 
+public:
+
+	// Serialization chunk IDs for the metadata blob tree. Public so the
+	// node-owned walk on ibValueMetaObject (SaveSubtree/LoadChildren) can emit
+	// the same layout the ibMetaData containers expect.
 	enum
 	{
 		eHeaderBlock = 0x2320,
@@ -386,10 +446,14 @@ protected:
 		eChildBlock = 0x2370
 	};
 
+protected:
+
 	bool m_metaModify;
 
-	//custom types
-	std::vector<ibCtorMetaValueType*> m_factoryCtors;
+	//custom types — clsid O(1); name / (metaValue,refType) linear (see ctorRegistry.h).
+	// type_info index stays empty here (ibCtorMetaValueType has no concrete typeid —
+	// metaobjects self-id via their own GetClassType() override, not typeid).
+	ibCtorRegistry<ibCtorMetaValueType> m_factoryCtors;
 	std::atomic<unsigned int> m_factoryCtorCountChanges = 0;
 
 	// Common-module skeleton — populated by descriptor's OnBeforeRunMetaObject

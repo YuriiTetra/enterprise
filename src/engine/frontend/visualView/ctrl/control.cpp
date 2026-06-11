@@ -6,7 +6,6 @@
 #include "control.h"
 #include "form.h"
 
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueControl, ibValueFrame)
 
 //*************************************************************************
 //*                          ValueControl		                          *
@@ -26,17 +25,14 @@ ibValueControl::~ibValueControl()
 
 void ibValueControl::SetOwnerForm(ibValueForm* ownerForm)
 {
-	if (ownerForm && m_formOwner == nullptr) {
-		if (GetComponentType() != COMPONENT_TYPE_SIZERITEM)
-			ownerForm->m_listControl.emplace(this);
-	}
-	else if (!ownerForm && m_formOwner != nullptr) {
-		m_formOwner->m_listControl.erase(this);
-	}
+	// Just record the owner. The form derives its control list by walking the
+	// hierarchy (ibValueForm::GetControlList) — there is no maintained set, so this
+	// no longer touches the form. Removes the teardown hazard where ~ibValueControl
+	// erased from an already-destroyed m_listControl.
 	m_formOwner = ownerForm;
 }
 
-ibMetaData* ibValueControl::GetMetaData() const
+const ibMetaData* ibValueControl::GetMetaData() const
 {
 	const ibValueMetaObjectFormBase* metaFormObject = m_formOwner ?
 		m_formOwner->GetFormMetaObject() : nullptr;

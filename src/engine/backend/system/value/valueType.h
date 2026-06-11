@@ -5,8 +5,7 @@
 #include "backend/backend_type.h"
 
 class BACKEND_API ibValueType : public ibValue {
-	wxDECLARE_DYNAMIC_CLASS(ibValueType);
-public:
+	public:
 
 	ibClassID GetOwnerTypeClass() const { return m_clsid; }
 	ibTypeDescription GetOwnerTypeDescription() const { return ibTypeDescription(GetOwnerTypeClass()); }
@@ -39,8 +38,7 @@ private:
 };
 
 class BACKEND_API ibValueQualifierNumber : public ibValue {
-	wxDECLARE_DYNAMIC_CLASS(ibValueQualifierNumber);
-public:
+	public:
 	ibQualifierNumber m_qNumber;
 public:
 
@@ -54,8 +52,7 @@ public:
 };
 
 class BACKEND_API ibValueQualifierDate : public ibValue {
-	wxDECLARE_DYNAMIC_CLASS(ibValueQualifierDate);
-public:
+	public:
 	ibQualifierDate m_qDate;
 public:
 
@@ -69,8 +66,7 @@ public:
 };
 
 class BACKEND_API ibValueQualifierString : public ibValue {
-	wxDECLARE_DYNAMIC_CLASS(ibValueQualifierString);
-public:
+	public:
 	ibQualifierString m_qString;
 public:
 
@@ -83,29 +79,23 @@ public:
 	operator ibQualifierString() const { return m_qString; }
 };
 
-class BACKEND_API ibValueTypeDescription : public ibValue {
-	wxDECLARE_DYNAMIC_CLASS_NO_COPY(ibValueTypeDescription);
-private:
-	ibValueMethodHelper* m_methodHelper;
+void ibValueTypeDescription_BindNames(ibValue::ibMemberTable& helper, const ibValue* ctx);
+
+class BACKEND_API ibValueTypeDescription : public ibValueStaticMembers<&ibValueTypeDescription_BindNames> {
 public:
 	ibTypeDescription m_typeDesc;
 public:
 
-	// these methods need to be overridden in your aggregate objects:
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return m_methodHelper;
-	}
-	virtual void PrepareNames() const;
+	// DoGetPMethods (protected) + Shared<&ibValueTypeDescription_BindNames> come from the base.
 	virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);
 
 public:
 
 	static ibValue AdjustValue(const ibTypeDescription& typeDescription,
-		class ibMetaData* metaData = nullptr);
+		const class ibMetaData* metaData = nullptr);
 
 	static ibValue AdjustValue(const ibTypeDescription& typeDescription, const ibValue& varValue,
-		class ibMetaData* metaData = nullptr);
+		const class ibMetaData* metaData = nullptr);
 
 	ibValueTypeDescription();
 

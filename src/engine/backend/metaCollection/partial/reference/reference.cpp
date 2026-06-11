@@ -9,7 +9,6 @@
 #include "backend/metaCollection/partial/tabularSection/tabularSection.h"
 #include "backend/databaseLayer/databaseLayer.h"
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueReferenceDataObject, ibValue);
 
 //**********************************************************************************************
 //*                                     reference                                              *        
@@ -33,12 +32,12 @@ void ibValueReferenceDataObject::PrepareRef(bool createData)
 				m_listObjectValue.insert_or_assign(object->GetMetaID(), object->CreateValue());
 			}
 		}
-		// table is collection values 
+		// table is collection values
 		for (const auto object : m_metaObject->GetTableArrayObject()) {
 			if (object->IsDeleted())
 				continue;
 			m_listObjectValue.insert_or_assign(object->GetMetaID(),
-				ibValue::CreateAndPrepareValueRef<ibValueTabularSectionDataObjectRef>(this, object));
+				new ibValueTabularSectionDataObjectRef(this, object));
 		}
 	}
 	else if (ibValueReferenceDataObject::ReadData(createData)) {
@@ -48,13 +47,13 @@ void ibValueReferenceDataObject::PrepareRef(bool createData)
 	if (createData) {
 		m_initializedRef = true;
 	}
-
-	PrepareNames();
+	// Name surface is lazy (FillMembers built on first GetPMethods).
 }
 
-ibValueReferenceDataObject::ibValueReferenceDataObject(const ibValueMetaObjectRecordDataRef* metaObject, const ibGuid& objGuid) : ibValue(ibValueTypes::TYPE_VALUE, true), ibValueDataObject(objGuid, !objGuid.isValid()),
-m_metaObject(metaObject), m_methodHelper(new ibValueMethodHelper()), m_initializedRef(false), m_reference_impl(nullptr), m_foundedRef(false)
+ibValueReferenceDataObject::ibValueReferenceDataObject(const ibValueMetaObjectRecordDataRef* metaObject, const ibGuid& objGuid) : ibValueDynamicMembers(ibValueTypes::TYPE_VALUE, true), ibValueDataObject(objGuid, !objGuid.isValid()),
+m_metaObject(metaObject), m_initializedRef(false), m_reference_impl(nullptr), m_foundedRef(false)
 {
+	m_members.Bind(this, &ibValueReferenceDataObject::FillMembers);
 	m_reference_impl = new ibReference(m_metaObject->GetMetaID(), m_objGuid);
 	//gs_references.emplace_back(this);
 }
@@ -66,12 +65,11 @@ ibValueReferenceDataObject::~ibValueReferenceDataObject()
 	//	std::remove_if(gs_references.begin(), gs_references.end(),
 	//		[this](ibValueReferenceDataObject* ref) { return ref == this;}), gs_references.end()
 	//);
-	wxDELETE(m_methodHelper);
 }
 
-ibValueReferenceDataObject* ibValueReferenceDataObject::Create(ibMetaData* metaData, const ibMetaID& id, const ibGuid& objGuid)
+ibValueReferenceDataObject* ibValueReferenceDataObject::Create(const ibMetaData* metaData, const ibMetaID& id, const ibGuid& objGuid)
 {
-	ibValueMetaObjectRecordDataRef* metaObject = metaData->FindAnyObjectByFilter<ibValueMetaObjectRecordDataRef>(id);
+	const ibValueMetaObjectRecordDataRef* metaObject = metaData->FindAnyObjectByFilter<ibValueMetaObjectRecordDataRef>(id);
 	if (metaObject != nullptr) {
 		//auto& it = std::find_if(gs_references.begin(), gs_references.end(), [metaObject, objGuid](ibValueReferenceDataObject* ref) {
 		//	return metaObject == ref->GetMetaObject() && objGuid == ref->GetGuid(); }
@@ -99,11 +97,18 @@ ibValueReferenceDataObject* ibValueReferenceDataObject::Create(const ibValueMeta
 	return refData;
 }
 
-ibValueReferenceDataObject* ibValueReferenceDataObject::Create(ibMetaData* metaData, void* ptr)
+ibValueReferenceDataObject* ibValueReferenceDataObject::CreateRaw(const ibValueMetaObjectRecordDataRef* metaObject, const ibGuid& objGuid)
+{
+	// Construct without PrepareRef (deferred to first use): the value-ctor
+	// registry path can't prepare eagerly without recursing. See header note.
+	return new ibValueReferenceDataObject(metaObject, objGuid);
+}
+
+ibValueReferenceDataObject* ibValueReferenceDataObject::Create(const ibMetaData* metaData, void* ptr)
 {
 	ibReference* reference = static_cast<ibReference*>(ptr);
 	if (reference != nullptr) {
-		ibValueMetaObjectRecordDataRef* metaObject = metaData->FindAnyObjectByFilter<ibValueMetaObjectRecordDataRef>(reference->m_id);
+		const ibValueMetaObjectRecordDataRef* metaObject = metaData->FindAnyObjectByFilter<ibValueMetaObjectRecordDataRef>(reference->m_id);
 		if (metaObject != nullptr) {
 			//auto& it = std::find_if(gs_references.begin(), gs_references.end(), [metaObject, reference](ibValueReferenceDataObject* ref) {
 			//	return metaObject == ref->GetMetaObject() && ref->GetGuid() == reference->m_guid; }
@@ -116,11 +121,11 @@ ibValueReferenceDataObject* ibValueReferenceDataObject::Create(ibMetaData* metaD
 	return nullptr;
 }
 
-ibValueReferenceDataObject* ibValueReferenceDataObject::CreateFromPtr(ibMetaData* metaData, void* ptr)
+ibValueReferenceDataObject* ibValueReferenceDataObject::CreateFromPtr(const ibMetaData* metaData, void* ptr)
 {
 	ibReference* reference = static_cast<ibReference*>(ptr);
 	if (reference != nullptr) {
-		ibValueMetaObjectRecordDataRef* metaObject = metaData->FindAnyObjectByFilter<ibValueMetaObjectRecordDataRef>(reference->m_id);
+		const ibValueMetaObjectRecordDataRef* metaObject = metaData->FindAnyObjectByFilter<ibValueMetaObjectRecordDataRef>(reference->m_id);
 		if (metaObject != nullptr) {
 			//auto& it = std::find_if(gs_references.begin(), gs_references.end(), [metaObject, reference](ibValueReferenceDataObject* ref) {
 			//	return metaObject == ref->GetMetaObject() && ref->GetGuid() == reference->m_guid; }
@@ -134,44 +139,6 @@ ibValueReferenceDataObject* ibValueReferenceDataObject::CreateFromPtr(ibMetaData
 		}
 	}
 	return nullptr;
-}
-
-ibValueReferenceDataObject* ibValueReferenceDataObject::CreateFromResultSet(ibDatabaseResultSet* rs, const ibValueMetaObjectRecordDataRef* metaObject, const ibGuid& refGuid)
-{
-	//auto& it = std::find_if(gs_references.begin(), gs_references.end(), [metaObject, refGuid](ibValueReferenceDataObject* ref) {
-	//	return metaObject == ref->GetMetaObject() && refGuid == ref->GetGuid(); }
-	//);
-	//if (it != gs_references.end())
-	//	return *it;
-
-	ibValueReferenceDataObject* refData = new ibValueReferenceDataObject(metaObject, refGuid);
-
-	//load attributes 
-	for (const auto object : metaObject->GetGenericAttributeArrayObject()) {
-		if (object->IsDeleted())
-			continue;
-		if (metaObject->IsDataReference(object->GetMetaID()))
-			continue;
-		ibValueMetaObjectAttributeBase::GetValueAttribute(
-			object,
-			refData->m_listObjectValue[object->GetMetaID()],
-			rs,
-			false
-		);
-	}
-
-	// table is collection values 
-	for (const auto object : metaObject->GetTableArrayObject()) {
-		if (object->IsDeleted())
-			continue;
-		refData->m_listObjectValue.insert_or_assign(
-			object->GetMetaID(),
-			ibValue::CreateAndPrepareValueRef<ibValueTabularSectionDataObjectRef>(refData, object, true)
-		);
-	}
-
-	refData->m_foundedRef = true;
-	return refData;
 }
 
 bool ibValueReferenceDataObject::SetValueByMetaID(const ibMetaID& id, const ibValue& varMetaVal)
@@ -263,27 +230,25 @@ enum Func {
 	enGetGuid
 };
 
-void ibValueReferenceDataObject::PrepareNames() const
+void ibValueReferenceDataObject::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-
 	ibValueMetaObjectRecordDataMutableRef* metaObject = nullptr;
 	if (m_metaObject->ConvertToValue(metaObject)) {
 
-		m_methodHelper->AppendFunc(wxT("IsEmpty"), wxT("IsEmpty()"));
-		m_methodHelper->AppendFunc(wxT("GetMetadata"), wxT("GetMetadata()"));
-		m_methodHelper->AppendFunc(wxT("GetObject"), wxT("GetObject()"));
-		m_methodHelper->AppendFunc(wxT("GetGuid"), wxT("GetGuid()"));
+		helper.AppendFunc(wxT("IsEmpty"), wxT("IsEmpty()"));
+		helper.AppendFunc(wxT("GetMetadata"), wxT("GetMetadata()"));
+		helper.AppendFunc(wxT("GetObject"), wxT("GetObject()"));
+		helper.AppendFunc(wxT("GetGuid"), wxT("GetGuid()"));
 
 		wxString objectName;
 
-		//fill custom attributes 
+		//fill custom attributes
 		for (const auto object : metaObject->GetGenericAttributeArrayObject()) {
 			if (object->IsDeleted())
 				continue;
 			if (!object->GetObjectNameAsString(objectName))
 				continue;
-			m_methodHelper->AppendProp(
+			helper.AppendProp(
 				objectName,
 				true,
 				false,
@@ -292,13 +257,13 @@ void ibValueReferenceDataObject::PrepareNames() const
 			);
 		}
 
-		//fill custom tables 
+		//fill custom tables
 		for (const auto object : metaObject->GetTableArrayObject()) {
 			if (object->IsDeleted())
 				continue;
 			if (!object->GetObjectNameAsString(objectName))
 				continue;
-			m_methodHelper->AppendProp(
+			helper.AppendProp(
 				objectName,
 				true,
 				false,
@@ -308,8 +273,8 @@ void ibValueReferenceDataObject::PrepareNames() const
 		}
 	}
 	else {
-		m_methodHelper->AppendFunc(wxT("IsEmpty"), wxT("IsEmpty()"));
-		m_methodHelper->AppendFunc(wxT("GetMetadata"), wxT("GetMetadata()"));
+		helper.AppendFunc(wxT("IsEmpty"), wxT("IsEmpty()"));
+		helper.AppendFunc(wxT("GetMetadata"), wxT("GetMetadata()"));
 	}
 }
 
@@ -320,13 +285,13 @@ bool ibValueReferenceDataObject::SetPropVal(const long lPropNum, const ibValue& 
 
 bool ibValueReferenceDataObject::GetPropVal(const long lPropNum, ibValue& pvarPropVal)
 {
-	const long lPropAlias = m_methodHelper->GetPropAlias(lPropNum);
+	const long lPropAlias = m_members.GetPropAlias(lPropNum);
 	ibValueReferenceDataObject::PrepareRef();
-	const ibMetaID& id = m_methodHelper->GetPropData(lPropNum);
+	const ibMetaID& id = m_members.GetPropData(lPropNum);
 	if (!m_metaObject->IsDataReference(id)) {
 		if (lPropAlias == eTable && !GetValueByMetaID(id, pvarPropVal)) {
 			m_listObjectValue.insert_or_assign(id,
-				ibValue::CreateAndPrepareValueRef<ibValueTabularSectionDataObjectRef>(this, m_metaObject->FindTableObjectByFilter(id), !m_newObject)
+				new ibValueTabularSectionDataObjectRef(this, m_metaObject->FindTableObjectByFilter(id), !m_newObject)
 			);
 		}
 		if (lPropAlias == eTable && GetValueByMetaID(id, pvarPropVal)) {
@@ -369,7 +334,7 @@ bool ibValueReferenceDataObject::CallAsFunc(const long lMethodNum, ibValue& pvar
 		pvarRetValue = GetObject();
 		return true;
 	case enGetGuid:
-		pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueGuid>(m_objGuid);
+		pvarRetValue = new ibValueGuid(m_objGuid);
 		return true;
 	}
 

@@ -2,11 +2,53 @@
 #define __META_TABLE_H__
 
 #include "backend/metaCollection/metaObjectComposite.h"
+#include "backend/query/queryable.h"
+#include "backend/query/queryableFactory.h"   // ibQueryableSourceDescriptor (the tabular L4 source descriptor)
 
-class BACKEND_API ibValueMetaObjectTableData : public ibValueMetaObjectCompositeData {
-	wxDECLARE_DYNAMIC_CLASS(ibValueMetaObjectTableData);
+// ibTabularQueryable — the L3 queryable for a tabular section (uuid-keyed, line-number
+// ordered). The tabular metaobject VENDS this adapter via the common GetQueryable()
+// interface — same as catalog / document / register / constant. The adapter is
+// parent-agnostic (the parent uuid is a query filter, supplied via WhereKey at read
+// time), so a transient (data-processor / report) parent simply never queries it.
+class ibValueMetaObjectTableData;
+class BACKEND_API ibTabularQueryable : public ibBackendQueryable {
+public:
+	explicit ibTabularQueryable(const ibValueMetaObjectTableData* meta) : m_meta(meta) {}
+	virtual const ibBackendQueryColumn* ResolveColumnByName(const wxString& name) const override;   // attribute-by-name AS a column
+	virtual wxString GetQueryTableName() const override;
+	virtual ibMetaID GetQueryMetaID() const override;
+	virtual const ibMetaData* GetMetaData() const override;                  // metadata context for column-based value reads
+	virtual std::vector<ibQuerySortItem> GetIdentitySort() const override;   // { line number } — parent uuid is a plain filter
+private:
+	const ibValueMetaObjectTableData* m_meta;
+};
+
+// ibTabularSourceDescriptor — the tabular section's L4 source descriptor. Like the standard
+// ibMetaSourceDescriptor it CONTAINS the queryable and replaces the plain m_queryable field;
+// but a tabular section is a SUB-object, so its (namespace, name) is PARENT-QUALIFIED —
+// ns = the parent record/document's kind, name = "<Parent>.<Section>" — reached as the
+// 3-segment source `Document.Expense.Goods`. Methods are out-of-line (the parent type is
+// incomplete here).
+class BACKEND_API ibTabularSourceDescriptor : public ibQueryableSourceDescriptor {
+public:
+	explicit ibTabularSourceDescriptor(ibValueMetaObjectTableData* meta);
+	wxString GetNamespace() const override;
+	wxString GetName() const override;
+	const ibBackendQueryable* CreateQueryable(ibValue** paParams, long lSizeArray) override;
+	const ibBackendQueryable* GetQueryable() const { return &m_queryable; }   // the metaobject's GetQueryable() forwards here
+private:
+	ibValueMetaObjectTableData* m_meta;
+	ibTabularQueryable          m_queryable;
+};
+
+class BACKEND_API ibValueMetaObjectTableData : public ibValueMetaObjectCompositeData, public ibBackendQueryableHolder {
+	public:
 
 public:
+
+	// the metaobject VENDS its queryable (via the L4 source descriptor it owns) — the common interface.
+	virtual const ibBackendQueryable* GetQueryable() const override { return m_queryable.GetQueryable(); }
+
 
 	ibItemMode GetTableUse() const { return m_propertyUse->GetValueAsEnum(); }
 
@@ -44,7 +86,8 @@ public:
 	virtual bool OnBeforeRunMetaObject(int flags);
 	virtual bool OnAfterRunMetaObject(int flags);
 
-	//after and before for designer 
+	//after and before for designer
+	virtual bool OnBeforeCloseMetaObject();
 	virtual bool OnAfterCloseMetaObject();
 
 #pragma region __generic_h__
@@ -126,6 +169,10 @@ private:
 	ibPropertyCategory* m_categoryGroup = ibPropertyObject::CreatePropertyCategory(wxT("Group"), _("Group"));
 	ibPropertyEnum<ibValueEnumItemMode>* m_propertyUse = ibPropertyObject::CreateProperty<ibPropertyEnum<ibValueEnumItemMode>>(m_categoryGroup, wxT("ItemMode"), _("Item mode"), ibItemMode::ibItemMode_Item);
 	ibPropertyContainer<>* m_propertyNumberLine = ibPropertyObject::CreateProperty<ibPropertyContainer<>>(m_categoryGroup, ibValueMetaObjectCompositeData::CreateNumber(wxT("NumberLine"), _("N"), wxEmptyString, 6, 0));
+
+	// the L4 source descriptor — CONTAINS the vended queryable (stable for this tabular section's
+	// life) and is registered with the factory on run / close; GetQueryable() forwards to it.
+	ibTabularSourceDescriptor m_queryable{ this };
 };
 
 #endif

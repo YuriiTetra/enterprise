@@ -23,17 +23,17 @@ wxPGProperty* ibObjectInspector::GetProperty(ibProperty*) const { return nullptr
 wxPGProperty* ibObjectInspector::GetEvent(ibEvent*) const { return nullptr; }
 
 // -----------------------------------------------------------------------------
-// ibFrontendDocMDIFrame — desktop main frame, touched by doc/view glue.
+// ibFrontendMainFrame — desktop main frame, touched by doc/view glue.
 // s_instance stays null so every null-check path is taken on web.
 // -----------------------------------------------------------------------------
 
-ibFrontendDocMDIFrame* ibFrontendDocMDIFrame::s_instance = nullptr;
-void ibFrontendDocMDIFrame::UpdateFrameManager() {}
+ibFrontendMainFrame* ibFrontendMainFrame::s_instance = nullptr;
+void ibFrontendMainFrame::UpdateFrameManager() {}
 
 // Web build has its own wxWebFrame / ibWebFrame plumbing; the desktop
 // frame's lazy-runtime hook is never reached. Stub keeps the inline
 // Show() in mainFrame.h link-clean inside wfrontend.dll.
-bool ibFrontendDocMDIFrame::EnsureRuntime() { return true; }
+bool ibFrontendMainFrame::EnsureRuntime() { return true; }
 
 // -----------------------------------------------------------------------------
 // ibKeyBinder — key-binding registry for the designer menus.
@@ -52,7 +52,7 @@ wxSize ibDynamicStaticText::DoGetBestClientSize() const { return wxDefaultSize; 
 // typeControl.cpp's ShowSelectType spawns it; never reached on web.
 // -----------------------------------------------------------------------------
 
-ibDialogSelectDataType::ibDialogSelectDataType(ibMetaData*, const std::vector<ibClassID>&) {}
+ibDialogSelectDataType::ibDialogSelectDataType(const ibMetaData*, const std::vector<ibClassID>&) {}
 ibDialogSelectDataType::~ibDialogSelectDataType() {}
 bool ibDialogSelectDataType::ShowModal(ibClassID&) { return false; }
 void ibDialogSelectDataType::OnListItemSelected(wxListEvent&) {}

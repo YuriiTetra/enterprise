@@ -19,7 +19,7 @@ const ibClassID g_controlNotebookPageCLSID = string_to_clsid("CT_NTPG");
 //********************************************************************************************
 
 class ibValueNotebook : public ibValueWindow {
-	wxDECLARE_DYNAMIC_CLASS(ibValueNotebook);
+	public:
 
 public:
 
@@ -38,8 +38,8 @@ public:
 	virtual void Update(wxObject* wxobject, ibVisualHost* visualHost) override;
 	virtual void Cleanup(wxObject* obj, ibVisualHost* visualHost) override;
 
-	//methods 
-	virtual void PrepareNames() const;                          // this method is automatically called to initialize attribute and method names.
+	//methods
+	void FillControlMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 	virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray) override;       //method call
 
 	/**
@@ -77,7 +77,7 @@ private:
 };
 
 class ibValueNotebookPage : public ibValueControl {
-	wxDECLARE_DYNAMIC_CLASS(ibValueNotebookPage);
+	public:
 
 public:
 

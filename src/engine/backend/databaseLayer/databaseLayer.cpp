@@ -17,6 +17,9 @@ ibDatabaseLayer::~ibDatabaseLayer()
 	CloseStatements();
 }
 
+// GetDialect() is pure virtual — each concrete driver owns its dialect
+// (see <driver>/<driver>DatabaseLayer.cpp::Dialect; ODBC returns the ANSI default).
+
 // --- Transaction wrappers (Option A: nested-safe counter layer) ------------
 //
 // See databaseLayer.h for the semantics. Drivers override the Do* methods;
@@ -270,10 +273,7 @@ int ibDatabaseLayer::GetSingleResultInt(const wxString& strSQL, const wxVariant*
 	int value = -1;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -303,34 +303,31 @@ int ibDatabaseLayer::GetSingleResultInt(const wxString& strSQL, const wxVariant*
 					break;
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
 
-		throw e;
+		// Make sure that a value was retrieved from the database
+		if (!valueRetrievedFlag)
+		{
+			value = -1;
+			SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
+			SetErrorMessage(wxT("No result was returned."));
+			ThrowDatabaseException();
+			return value;
+		}
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	// Make sure that a value was retrieved from the database
-	if (!valueRetrievedFlag)
-	{
-		value = -1;
-		SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
-		SetErrorMessage(wxT("No result was returned."));
-		ThrowDatabaseException();
-		return value;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return value;
@@ -354,10 +351,7 @@ wxString ibDatabaseLayer::GetSingleResultString(const wxString& strSQL, const wx
 	wxString value = wxEmptyString;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -387,34 +381,31 @@ wxString ibDatabaseLayer::GetSingleResultString(const wxString& strSQL, const wx
 					break;
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
 
-		throw e;
+		// Make sure that a value was retrieved from the database
+		if (!valueRetrievedFlag)
+		{
+			value = wxEmptyString;
+			SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
+			SetErrorMessage(wxT("No result was returned."));
+			ThrowDatabaseException();
+			return value;
+		}
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	// Make sure that a value was retrieved from the database
-	if (!valueRetrievedFlag)
-	{
-		value = wxEmptyString;
-		SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
-		SetErrorMessage(wxT("No result was returned."));
-		ThrowDatabaseException();
-		return value;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return value;
@@ -438,10 +429,7 @@ long ibDatabaseLayer::GetSingleResultLong(const wxString& strSQL, const wxVarian
 	long value = -1;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -471,34 +459,31 @@ long ibDatabaseLayer::GetSingleResultLong(const wxString& strSQL, const wxVarian
 					break;
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
 
-		throw e;
+		// Make sure that a value was retrieved from the database
+		if (!valueRetrievedFlag)
+		{
+			value = -1;
+			SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
+			SetErrorMessage(wxT("No result was returned."));
+			ThrowDatabaseException();
+			return value;
+		}
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	// Make sure that a value was retrieved from the database
-	if (!valueRetrievedFlag)
-	{
-		value = -1;
-		SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
-		SetErrorMessage(wxT("No result was returned."));
-		ThrowDatabaseException();
-		return value;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return value;
@@ -522,10 +507,7 @@ bool ibDatabaseLayer::GetSingleResultBool(const wxString& strSQL, const wxVarian
 	bool value = false;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -555,34 +537,31 @@ bool ibDatabaseLayer::GetSingleResultBool(const wxString& strSQL, const wxVarian
 					break;
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
 
-		throw e;
+		// Make sure that a value was retrieved from the database
+		if (!valueRetrievedFlag)
+		{
+			value = false;
+			SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
+			SetErrorMessage(wxT("No result was returned."));
+			ThrowDatabaseException();
+			return value;
+		}
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	// Make sure that a value was retrieved from the database
-	if (!valueRetrievedFlag)
-	{
-		value = false;
-		SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
-		SetErrorMessage(wxT("No result was returned."));
-		ThrowDatabaseException();
-		return value;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return value;
@@ -606,10 +585,7 @@ wxDateTime ibDatabaseLayer::GetSingleResultDate(const wxString& strSQL, const wx
 	wxDateTime value = wxDefaultDateTime;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -639,34 +615,31 @@ wxDateTime ibDatabaseLayer::GetSingleResultDate(const wxString& strSQL, const wx
 					break;
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
 
-		throw e;
+		// Make sure that a value was retrieved from the database
+		if (!valueRetrievedFlag)
+		{
+			value = wxDefaultDateTime;
+			SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
+			SetErrorMessage(wxT("No result was returned."));
+			ThrowDatabaseException();
+			return value;
+		}
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	// Make sure that a value was retrieved from the database
-	if (!valueRetrievedFlag)
-	{
-		value = wxDefaultDateTime;
-		SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
-		SetErrorMessage(wxT("No result was returned."));
-		ThrowDatabaseException();
-		return value;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return value;
@@ -690,10 +663,7 @@ void* ibDatabaseLayer::GetSingleResultBlob(const wxString& strSQL, const wxVaria
 	void* value = nullptr;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -723,34 +693,31 @@ void* ibDatabaseLayer::GetSingleResultBlob(const wxString& strSQL, const wxVaria
 					break;
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
 
-		throw e;
+		// Make sure that a value was retrieved from the database
+		if (!valueRetrievedFlag)
+		{
+			value = nullptr;
+			SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
+			SetErrorMessage(wxT("No result was returned."));
+			ThrowDatabaseException();
+			return value;
+		}
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	// Make sure that a value was retrieved from the database
-	if (!valueRetrievedFlag)
-	{
-		value = nullptr;
-		SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
-		SetErrorMessage(wxT("No result was returned."));
-		ThrowDatabaseException();
-		return value;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return value;
@@ -774,10 +741,7 @@ double ibDatabaseLayer::GetSingleResultDouble(const wxString& strSQL, const wxVa
 	double value = -1;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -807,34 +771,31 @@ double ibDatabaseLayer::GetSingleResultDouble(const wxString& strSQL, const wxVa
 					break;
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
 
-		throw e;
+		// Make sure that a value was retrieved from the database
+		if (!valueRetrievedFlag)
+		{
+			value = -1;
+			SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
+			SetErrorMessage(wxT("No result was returned."));
+			ThrowDatabaseException();
+			return value;
+		}
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	// Make sure that a value was retrieved from the database
-	if (!valueRetrievedFlag)
-	{
-		value = -1;
-		SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
-		SetErrorMessage(wxT("No result was returned."));
-		ThrowDatabaseException();
-		return value;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return value;
@@ -858,10 +819,7 @@ ibNumber ibDatabaseLayer::GetSingleResultNumber(const wxString& strSQL, const wx
 	ibNumber value = -1;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -892,34 +850,31 @@ ibNumber ibDatabaseLayer::GetSingleResultNumber(const wxString& strSQL, const wx
 					break;
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
 
-		throw e;
+		// Make sure that a value was retrieved from the database
+		if (!valueRetrievedFlag)
+		{
+			value = -1;
+			SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
+			SetErrorMessage(wxT("No result was returned."));
+			ThrowDatabaseException();
+			return value;
+		}
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	// Make sure that a value was retrieved from the database
-	if (!valueRetrievedFlag)
-	{
-		value = -1;
-		SetErrorCode(DATABASE_LAYER_NO_ROWS_FOUND);
-		SetErrorMessage(wxT("No result was returned."));
-		ThrowDatabaseException();
-		return value;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return value;
@@ -942,10 +897,7 @@ wxArrayInt ibDatabaseLayer::GetResultsArrayInt(const wxString& strSQL, const wxV
 	wxArrayInt returnArray;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -955,24 +907,21 @@ wxArrayInt ibDatabaseLayer::GetResultsArrayInt(const wxString& strSQL, const wxV
 			else
 				returnArray.Add(pResult->GetResultInt(field->GetLong()));
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return returnArray;
@@ -995,10 +944,7 @@ wxArrayString ibDatabaseLayer::GetResultsArrayString(const wxString& strSQL, con
 	wxArrayString returnArray;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -1008,24 +954,21 @@ wxArrayString ibDatabaseLayer::GetResultsArrayString(const wxString& strSQL, con
 			else
 				returnArray.Add(pResult->GetResultString(field->GetLong()));
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return returnArray;
@@ -1048,10 +991,7 @@ wxArrayLong ibDatabaseLayer::GetResultsArrayLong(const wxString& strSQL, const w
 	wxArrayLong returnArray;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -1061,24 +1001,21 @@ wxArrayLong ibDatabaseLayer::GetResultsArrayLong(const wxString& strSQL, const w
 			else
 				returnArray.Add(pResult->GetResultLong(field->GetLong()));
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return returnArray;
@@ -1102,10 +1039,7 @@ wxArrayDouble ibDatabaseLayer::GetResultsArrayDouble(const wxString& strSQL, con
 	wxArrayDouble returnArray;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		pResult = ExecuteQuery(strSQL);
 
 		while (pResult->Next())
@@ -1115,24 +1049,21 @@ wxArrayDouble ibDatabaseLayer::GetResultsArrayDouble(const wxString& strSQL, con
 			else
 				returnArray.Add(pResult->GetResultDouble(field->GetLong()));
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return returnArray;

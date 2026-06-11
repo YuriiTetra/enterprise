@@ -20,11 +20,13 @@
 ibValueRecordDataObjectCatalog::ibValueRecordDataObjectCatalog(const ibValueMetaObjectCatalog* metaObject, const ibGuid& objGuid, ibObjectMode objMode) :
 	ibValueRecordDataObjectHierarchyRef(metaObject, objGuid, objMode)
 {
+	m_members.Bind(this, &ibValueRecordDataObjectCatalog::FillMethods);
 }
 
 ibValueRecordDataObjectCatalog::ibValueRecordDataObjectCatalog(const ibValueRecordDataObjectCatalog& source) :
 	ibValueRecordDataObjectHierarchyRef(source)
 {
+	m_members.Bind(this, &ibValueRecordDataObjectCatalog::FillMethods);
 }
 
 ibSourceExplorer ibValueRecordDataObjectCatalog::GetSourceExplorer() const
@@ -85,208 +87,20 @@ ibSourceExplorer ibValueRecordDataObjectCatalog::GetSourceExplorer() const
 	return srcHelper;
 }
 
-#pragma region _form_builder_h_
-void ibValueRecordDataObjectCatalog::ShowFormValue(const wxString& strFormName, ibBackendControlFrame* ownerControl)
-{
-	ibBackendValueForm* const foundedForm = GetForm();
-
-	if (foundedForm && foundedForm->IsShown()) {
-		foundedForm->ActivateForm();
-		return;
-	}
-
-	//if form is not initialized then generate  
-	ibBackendValueForm* const valueForm =
-		GetFormValue(strFormName, ownerControl);
-
-	if (valueForm != nullptr) {	
-		valueForm->Modify(m_objModified);
-		valueForm->ShowForm();
-	}
-}
-
-ibBackendValueForm* ibValueRecordDataObjectCatalog::GetFormValue(const wxString& strFormName, ibBackendControlFrame* ownerControl)
-{
-	ibBackendValueForm* const foundedForm = GetForm();
-
-	if (foundedForm == nullptr) {
-
-		ibBackendValueForm* createdForm = m_metaObject->CreateAndBuildForm(
-			strFormName,
-			m_objMode == ibObjectMode::OBJECT_ITEM ? ibValueMetaObjectCatalog::eFormObject : ibValueMetaObjectCatalog::eFormFolder,
-			ownerControl,
-			this,
-			m_objGuid
-		);
-
-		if (createdForm != nullptr)
-			createdForm->CloseOnOwnerClose(false);
-		
-		return createdForm;
-	}
-
-	return foundedForm;
-}
-#pragma endregion
+// ShowFormValue / GetFormValue moved up to HierarchyRef — see
+// commonObject.cpp. Catalog only provides GetCurrentObjectFormID
+// inline in catalog.h.
 
 //***********************************************************************************************
 //*                                   Catalog events                                            *
 //***********************************************************************************************
 
-bool ibValueRecordDataObjectCatalog::WriteObject()
-{
-	if (!appData->DesignerMode())
-	{
-		// Acquire a pool connection for this method's worth of DB
-		// work. Nested calls (register writes, BeforeWrite/OnWrite
-		// script hooks that start their own transactions) inherit
-		// this connection via TL; the base-class counter collapses
-		// their BeginTransaction / Commit onto this outer TX.
-		ibConnectionScope scope = ibSession::Current()->OpenConnectionScope();
-
-		if (!scope || !scope->IsOpen())
-			ibBackendCoreException::Error(_("Database is not open!"));
-
-		if (!ibBackendException::IsEvalMode())
-		{
-			if (!m_metaObject->AccessRight_Write()) {
-				ibBackendAccessException::Error();
-				return false;
-			}
-
-			{
-				ibBackendValueForm* const valueForm = GetForm();
-				{
-					scope.SafeBeginTransaction();
-
-					{
-						ibValue cancel = false;
-						ExecAsProc(wxT("BeforeWrite"), cancel);
-
-						if (cancel.GetBoolean()) {
-							scope.SafeRollBackTransaction();
-							ibBackendCoreException::Error(_("Failed to write object in db!"));
-							return false;
-						}
-					}
-
-					bool newObject = ibValueRecordDataObjectCatalog::IsNewObject();
-					bool generateUniqueIdentifier = false;
-					
-					if (!IsSetUniqueIdentifier()) {
-						ibValue prefix = "", standartProcessing = true;
-						ExecAsProc(wxT("SetNewCode"), prefix, standartProcessing);
-						if (standartProcessing.GetBoolean()) {
-							generateUniqueIdentifier = 
-								ibValueRecordDataObjectCatalog::GenerateUniqueIdentifier(prefix.GetString());
-						}
-					}
-
-					if (!SaveData()) {
-						if (generateUniqueIdentifier)
-							ibValueRecordDataObjectCatalog::ResetUniqueIdentifier();
-						scope.SafeRollBackTransaction();
-						ibBackendCoreException::Error(_("Failed to write object in db!"));
-						return false;
-					}
-
-					{
-						ibValue cancel = false;
-						ExecAsProc(wxT("OnWrite"), cancel);
-						if (cancel.GetBoolean()) {
-							if (generateUniqueIdentifier)
-								ibValueRecordDataObjectCatalog::ResetUniqueIdentifier();
-							scope.SafeRollBackTransaction();
-							ibBackendCoreException::Error(_("Failed to write object in db!"));
-							return false;
-						}
-					}
-
-					scope.SafeCommitTransaction();
-
-					if (newObject && valueForm != nullptr) valueForm->NotifyCreate(GetReference());
-					else if (valueForm != nullptr) valueForm->NotifyChange(GetReference());
-				}
-				m_objModified = false;
-			}
-		}
-	}
-
-	return true;
-}
-
-bool ibValueRecordDataObjectCatalog::DeleteObject()
-{
-	if (!appData->DesignerMode())
-	{
-		// Acquire a pool connection for this method's DB work; nested
-		// calls (BeforeDelete / OnDelete script hooks) inherit it via
-		// the thread-local slot. See WriteObject for the full pattern.
-		ibConnectionScope scope = ibSession::Current()->OpenConnectionScope();
-
-		if (!scope || !scope->IsOpen())
-			ibBackendCoreException::Error(_("Database is not open!"));
-
-		if (!ibBackendException::IsEvalMode())
-		{
-			if (!m_metaObject->AccessRight_Delete()) {
-				ibBackendAccessException::Error();
-				return false;
-			}
-
-			const ibValueMetaObjectRecordDataHierarchyMutableRef* valueMetaObject = GetMetaObject();
-			wxASSERT(valueMetaObject);
-
-			const ibGuid& objGuid = GetGuid();
-			const auto predefinedValue =
-				valueMetaObject->FindPredefinedValue(objGuid);
-
-			if (predefinedValue != nullptr) {
-				ibBackendCoreException::Error(_("Attempting to delete a predefined element!"));
-				return false;
-			}
-
-			{
-				ibBackendValueForm* const valueForm = GetForm();
-				{
-					scope.SafeBeginTransaction();
-
-					{
-						ibValue cancel = false;
-						ExecAsProc(wxT("BeforeDelete"), cancel);
-						if (cancel.GetBoolean()) {
-							scope.SafeRollBackTransaction();
-							ibBackendCoreException::Error(_("Failed to delete object in db!"));
-							return false;
-						}
-					}
-
-					if (!DeleteData()) {
-						scope.SafeRollBackTransaction();
-						ibBackendCoreException::Error(_("Failed to delete object in db!")); 
-						return false;
-					}
-
-					{
-						ibValue cancel = false;
-						ExecAsProc(wxT("OnDelete"), cancel);
-						if (cancel.GetBoolean()) {
-							scope.SafeRollBackTransaction();
-							ibBackendCoreException::Error(_("Failed to delete object in db!")); 
-							return false;
-						}
-					}
-
-					scope.SafeCommitTransaction();
-
-					if (valueForm != nullptr) valueForm->NotifyDelete(GetReference());
-				}
-			}
-		}
-	}
-
-	return true;
-}
+// WriteObject / DeleteObject inherited from
+// ibValueRecordDataObjectHierarchyRef — see commonObjectRefQuery.cpp
+// for the Phase B template-method scaffold body. Per-type behaviour
+// (code generator, predefined-guard) resolves through virtual dispatch
+// (GenerateUniqueIdentifier / ResetUniqueIdentifier / metaobject's
+// FindPredefinedValue).
 
 enum Func {
 	enIsNew = 0,
@@ -297,67 +111,36 @@ enum Func {
 	enModified,
 	enGetForm,
 	enGetTemplate,
-	enGetMetadata
+	enGetMetadata,
+	enLock,
+	enUnlock
 };
 
 //****************************************************************************
 //*                              Support methods                             *
 //****************************************************************************
 
-void ibValueRecordDataObjectCatalog::PrepareNames() const
+void ibValueRecordDataObjectCatalog::FillMethods(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-
-	m_methodHelper->AppendFunc(wxT("IsNew"), wxT("IsNew()"));
-	m_methodHelper->AppendFunc(wxT("Copy"), wxT("Copy()"));
-	m_methodHelper->AppendFunc(wxT("Fill"), 1, wxT("Fill(object)"));
-	m_methodHelper->AppendFunc(wxT("Write"), wxT("Write()"));
-	m_methodHelper->AppendFunc(wxT("Delete"), wxT("Delete()"));
-	m_methodHelper->AppendFunc(wxT("Modified"), wxT("Modified()"));
-	m_methodHelper->AppendFunc(wxT("GetFormObject"), 3, wxT("GetFormObject(name : string, owner : any , id : guid)"));
-	m_methodHelper->AppendFunc(wxT("GetTemplate"), 1, wxT("GetTemplate(name : string)"));
-	m_methodHelper->AppendFunc(wxT("GetMetadata"), wxT("GetMetadata()"));
-
-	m_methodHelper->AppendProp(wxT("ThisObject"), true, false, true, eThisObject, eSystem);
-
-	//set object name
-	wxString objectName;
-
-	//fill custom attributes 
-	for (const auto object : m_metaObject->GetGenericAttributeArrayObject()) {
-		if (object->IsDeleted())
-			continue;
-		if (!object->GetObjectNameAsString(objectName))
-			continue;
-		m_methodHelper->AppendProp(
-			objectName,
-			true,
-			!m_metaObject->IsDataReference(object->GetMetaID()),
-			object->GetMetaID(),
-			eProperty
-		);
-	}
-
-	//fill custom tables 
-	for (const auto object : m_metaObject->GetGenericTableArrayObject()) {
-		if (object->IsDeleted())
-			continue;
-		if (!object->GetObjectNameAsString(objectName))
-			continue;
-		m_methodHelper->AppendProp(
-			objectName,
-			true,
-			false,
-			object->GetMetaID(),
-			eTable
-		);
-	}
-	ExportNamesToHelper(m_methodHelper, eProcUnit);
+	// Catalog's own methods. The data members (attributes / tabular sections /
+	// module exports) come from the base FillDataMembers. Order is load-bearing —
+	// CallAsFunc switches on the method index (enIsNew = 0 …).
+	helper.AppendFunc(wxT("IsNew"), wxT("IsNew()"));
+	helper.AppendFunc(wxT("Copy"), wxT("Copy()"));
+	helper.AppendFunc(wxT("Fill"), 1, wxT("Fill(object)"));
+	helper.AppendFunc(wxT("Write"), wxT("Write()"));
+	helper.AppendFunc(wxT("Delete"), wxT("Delete()"));
+	helper.AppendFunc(wxT("Modified"), wxT("Modified()"));
+	helper.AppendFunc(wxT("GetFormObject"), 3, wxT("GetFormObject(name : string, owner : any , id : guid)"));
+	helper.AppendFunc(wxT("GetTemplate"), 1, wxT("GetTemplate(name : string)"));
+	helper.AppendFunc(wxT("GetMetadata"), wxT("GetMetadata()"));
+	helper.AppendProc(wxT("Lock"),   wxT("Lock()"));
+	helper.AppendProc(wxT("Unlock"), wxT("Unlock()"));
 }
 
 bool ibValueRecordDataObjectCatalog::SetPropVal(const long lPropNum, const ibValue& varPropVal)
 {
-	const long lPropAlias = m_methodHelper->GetPropAlias(lPropNum);
+	const long lPropAlias = m_members.GetPropAlias(lPropNum);
 	if (lPropAlias == eProcUnit) {
 		if (m_procUnit != nullptr) {
 			return m_procUnit->SetPropVal(
@@ -367,7 +150,7 @@ bool ibValueRecordDataObjectCatalog::SetPropVal(const long lPropNum, const ibVal
 	}
 	else if (lPropAlias == eProperty) {
 		return SetValueByMetaID(
-			m_methodHelper->GetPropData(lPropNum),
+			m_members.GetPropData(lPropNum),
 			varPropVal
 		);
 	}
@@ -377,7 +160,7 @@ bool ibValueRecordDataObjectCatalog::SetPropVal(const long lPropNum, const ibVal
 
 bool ibValueRecordDataObjectCatalog::GetPropVal(const long lPropNum, ibValue& pvarPropVal)
 {
-	const long lPropAlias = m_methodHelper->GetPropAlias(lPropNum);
+	const long lPropAlias = m_members.GetPropAlias(lPropNum);
 	if (lPropAlias == eProcUnit) {
 		if (m_procUnit != nullptr) {
 			return m_procUnit->GetPropVal(
@@ -386,20 +169,12 @@ bool ibValueRecordDataObjectCatalog::GetPropVal(const long lPropNum, ibValue& pv
 		}
 	}
 	else if (lPropAlias == eProperty || lPropAlias == eTable) {
-		const long lPropData = m_methodHelper->GetPropData(lPropNum);
+		const long lPropData = m_members.GetPropData(lPropNum);
 		if (m_metaObject->IsDataReference(lPropData)) {
 			pvarPropVal = GetReference();
 			return true;
 		}
 		return GetValueByMetaID(lPropData, pvarPropVal);
-	}
-	else if (lPropAlias == eSystem) {
-		switch (m_methodHelper->GetPropData(lPropNum))
-		{
-		case eThisObject:
-			pvarPropVal = GetValue();
-			return true;
-		}
 	}
 	return false;
 }
@@ -437,6 +212,12 @@ bool ibValueRecordDataObjectCatalog::CallAsFunc(const long lMethodNum, ibValue& 
 		return true;
 	case Func::enGetMetadata:
 		pvarRetValue = m_metaObject;
+		return true;
+	case Func::enLock:
+		TryAcquireFormLock();
+		return true;
+	case Func::enUnlock:
+		ReleaseFormLock();
 		return true;
 	}
 

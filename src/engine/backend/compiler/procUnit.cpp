@@ -264,8 +264,7 @@ inline void AddValue(ibValue& cValue1, const ibValue& cValue2, const ibValue& cV
 		}
 	}
 	else {
-		cValue1.m_typeClass = ibValueTypes::TYPE_STRING;
-		cValue1.m_sData = cValue2.GetString() + cValue3.GetString();
+		cValue1.SetString(cValue2.GetString() + cValue3.GetString());
 	}
 }
 
@@ -392,7 +391,7 @@ inline void CompareValueNE(ibValue& cValue1, const ibValue& cValue2, const ibVal
 
 #define CheckAndError(variable, name)\
 {\
- if(variable.m_typeClass!=ibValueTypes::TYPE_REFFER)\
+ if(!variable.IsReference())\
  ibBackendCoreException::Error(_("No attribute or method found '%s' - a variable is not an aggregate object"), name);\
  else\
  ibBackendCoreException::Error(_("Aggregate object field not found '%s'"), name);\
@@ -423,7 +422,7 @@ inline bool GetArrayValue(ibValue& cValue1, ibValue& cValue2, const ibValue& cVa
 inline ibValue GetValue(const ibValue& cValue1)
 {
 	if (cValue1.m_bReadOnly
-		&& cValue1.m_typeClass != ibValueTypes::TYPE_REFFER) {
+		&& !cValue1.IsReference()) {
 		ibValue cVal;
 		CopyValue(cVal, cValue1);
 		return cVal;
@@ -437,10 +436,8 @@ inline ibValue GetValue(const ibValue& cValue1)
 // wxIMPLEMENT_DYNAMIC_CLASS + the CLSID statics + ibValueFunction's
 // out-of-line bits — stay in this TU.
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueIterator, ibValue);
 const ibClassID g_valueIterator = string_to_clsid("SO_ITER");
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueFunction, ibValue);
 const ibClassID g_valueFunction = string_to_clsid("VL_FUNC");
 
 // LINQ machinery — CallLambdaWithArg / CallLambdaWith2Args /
@@ -628,7 +625,7 @@ start_label:
 				ibValue* pRetValue = &variable1;
 				ibRunContextSmall cRunContext(array2);
 				cRunContext.m_lParamCount = array2;
-				const wxString className = m_pByteCode->m_listConst[index2].m_sData;
+				const wxString className = m_pByteCode->m_listConst[index2].GetString();
 				//load parameters
 				for (long i = 0; i < cRunContext.m_lParamCount; i++) {
 					lCodeLine++;
@@ -638,7 +635,7 @@ start_label:
 						// resolve) would throw on const slots before reaching
 						// the m_bReadOnly check, breaking const literal args
 						// like `New Foo(3, 5)`. Mirrors OPER_CALL_METHOD's pattern.
-						if (cvariable1.m_bReadOnly && cvariable1.m_typeClass != ibValueTypes::TYPE_REFFER) {
+						if (cvariable1.m_bReadOnly && !cvariable1.IsReference()) {
 							CopyValue(cRunContext.m_pLocVars[i], cvariable1);
 						}
 						else {
@@ -649,18 +646,20 @@ start_label:
 				CopyValue(*pRetValue, ibValue::CreateObject(className, cRunContext.m_lParamCount > 0 ? cRunContext.m_pRefLocVars : nullptr, cRunContext.m_lParamCount));
 			} break;
 			case OPER_SET_A:
+			case OPER_SET_SCOPE://writable member of a scope binding — identical parent+prop write
 			{//setting attribute
-				const wxString& strPropName = m_pByteCode->m_listConst[index2].m_sData;
+				const wxString& strPropName = m_pByteCode->m_listConst[index2].GetString();
 				const long lPropNum = variable1.FindProp(strPropName);
 				if (lPropNum < 0) CheckAndError(variable1, strPropName);
 				if (!variable1.IsPropWritable(lPropNum)) ibBackendCoreException::Error(_("Object field not writable (%s)"), strPropName);
 				variable1.SetPropVal(lPropNum, GetValue(cvariable3));
 			} break;
 			case OPER_GET_A://get attribute
+			case OPER_GET_SCOPE://bare member of a scope binding — identical parent+prop resolve
 			{
 				ibValue* pRetValue = &variable1;
 				ibValue* pVariable2 = &variable2;
-				const wxString& strPropName = m_pByteCode->m_listConst[index3].m_sData;
+				const wxString& strPropName = m_pByteCode->m_listConst[index3].GetString();
 				const long lPropNum = variable2.FindProp(strPropName);
 				if (lPropNum < 0) CheckAndError(variable2, strPropName);
 				if (!variable2.IsPropReadable(lPropNum)) ibBackendCoreException::Error(_("Object field not readable (%s)"), strPropName);
@@ -674,10 +673,29 @@ start_label:
 				if (m_pByteCode->m_bExpressionOnly && variable2.IsPropScoped(lPropNum))
 					ibBackendCoreException::Error(_("Object field is scope-local (%s)"), strPropName);
 				ibValue vRet; bool result = variable2.GetPropVal(lPropNum, vRet);
-				if (result && vRet.m_typeClass == ibValueTypes::TYPE_REFFER)
+				if (result && vRet.IsReference())
 					*pRetValue = vRet;
 				else if (result)
 					CopyValue(*pRetValue, vRet);
+				break;
+			}
+			case OPER_GET_EXTERN://named binder handle (export) — value staged in the slot (m_param2)
+			case OPER_GET_CONTEXT://named binder handle (context: ThisObject/ThisForm) — same
+			{
+				// Lazy: the relaxed pre-flight leaves an unbound slot Undefined;
+				// copy the slot value out to the dest temp, preserving references
+				// so member access (`.X`) walks the live handle.
+				ibValue* pRetValue = &variable1;
+				if (variable2.IsReference())
+					*pRetValue = variable2;
+				else
+					CopyValue(*pRetValue, variable2);
+				break;
+			}
+			case OPER_SET_EXTERN://assign back to a named handle's slot (rare — handles are read-only)
+			case OPER_SET_CONTEXT:
+			{
+				CopyValue(variable1, GetValue(cvariable3));
 				break;
 			}
 			case OPER_CALL_METHOD://method call
@@ -685,7 +703,7 @@ start_label:
 				ibValue* pRetValue = &variable1;
 				ibValue* pVariable2 = &variable2;
 
-				const wxString& funcName = m_pByteCode->m_listConst[index3].m_sData;
+				const wxString& funcName = m_pByteCode->m_listConst[index3].GetString();
 				// Resolve method number on every call. Bytecode is a const
 				// template at runtime — no opcode-level cache patching.
 				// (The previous "cache" path stored resolved method # /
@@ -726,7 +744,7 @@ start_label:
 						CopyValue(cRunContext.m_pLocVars[i], m_pByteCode->m_listConst[index1]);
 					}
 					else if (index1 >= 0 && !pVariable2->GetParamDefValue(lMethodNum, i, *cRunContext.m_pRefLocVars[i])) {
-						if (cvariable1.m_bReadOnly && cvariable1.m_typeClass != ibValueTypes::TYPE_REFFER) {
+						if (cvariable1.m_bReadOnly && !cvariable1.IsReference()) {
 							CopyValue(cRunContext.m_pLocVars[i], cvariable1);
 						}
 						else {
@@ -784,7 +802,7 @@ start_label:
 						CopyValue(cRunContext.m_pLocVars[i], m_pByteCode->m_listConst[index1]);
 					}
 					else {
-						if (cvariable1.m_bReadOnly && cvariable1.m_typeClass != ibValueTypes::TYPE_REFFER) {
+						if (cvariable1.m_bReadOnly && !cvariable1.IsReference()) {
 							CopyValue(cRunContext.m_pLocVars[i], cvariable1);
 						}
 						else {
@@ -1179,8 +1197,8 @@ start_label:
 				break; //getting the array value
 			case OPER_IF + TYPE_DELTA1: if (cvariable1.m_fData.IsZero()) lCodeLine = index2 - 1; break;
 				//STRING
-			case OPER_ADD + TYPE_DELTA2: variable1.m_sData = cvariable2.m_sData + cvariable3.m_sData; break;
-			case OPER_LET + TYPE_DELTA2: variable1.m_sData = cvariable2.m_sData; break;
+			case OPER_ADD + TYPE_DELTA2: variable1.SetString(cvariable2.GetString() + cvariable3.GetString()); break;
+			case OPER_LET + TYPE_DELTA2: variable1.SetString(cvariable2.GetString()); break;
 			case OPER_SET_ARRAY + TYPE_DELTA2:
 				if (!SetArrayValue(variable1, cvariable2, GetValue(cvariable3)))
 					ibBackendCoreException::Error(_("Cannot set array value '%s'"), cvariable3.GetString());
@@ -1189,7 +1207,7 @@ start_label:
 				if (!GetArrayValue(variable1, variable2, cvariable3))
 					ibBackendCoreException::Error(_("Cannot get array value '%s'"), cvariable3.GetString());
 				break; //getting the array value
-			case OPER_IF + TYPE_DELTA2: if (cvariable1.m_sData.IsEmpty()) lCodeLine = index2 - 1; break;
+			case OPER_IF + TYPE_DELTA2: if (cvariable1.IsEmpty()) lCodeLine = index2 - 1; break;
 				//DATE
 			case OPER_ADD + TYPE_DELTA3: variable1.m_dData = cvariable2.m_dData + cvariable3.m_dData; break;
 			case OPER_SUB + TYPE_DELTA3: variable1.m_dData = cvariable2.m_dData - cvariable3.m_dData; break;
@@ -1355,15 +1373,34 @@ void ibProcUnit::Execute(const ibByteCode& cByteCode, ibByteBinder& br, ibValue*
 	// the binder's m_slots vector matches the entry's m_slotIndex
 	// (= runtime frame slot), so we copy 1:1 into m_pRefLocVars.
 	for (const auto& v : cByteCode.m_listVar) {
-		if (!v.IsBindRequired()) continue;
 		const size_t slot = static_cast<size_t>(v.m_slotIndex);
 		ibValue* val = (slot < bindings.size()) ? bindings[slot] : nullptr;
+		if (!v.IsBindRequired()) {
+			// Bound LOCAL (e.g. a constant's Value backed by &m_constValue): the
+			// binder seeded its slot — fill it, no required/type pre-flight. An
+			// ordinary unbound local leaves a null binding and keeps its frame
+			// default; ContextProp/Export carry no binder slot at all.
+			if (val != nullptr)
+				m_cCurContext.m_pRefLocVars[slot] = val;
+			continue;
+		}
 		if (val == nullptr) {
+			// EXPORT: present-or-not is fine — the slot stays Undefined and the
+			// OPER_GET_EXTERN handler copies it out lazily.
+			if (v.IsExternal()) continue;
+			// CONTEXT (ThisObject / ThisForm): a required, typed self-handle —
+			// it must be wired before the module runs.
 			ibBackendCoreException::Error(
 				_("Required binding not provided: '%s' (slot %zu)"),
 				v.m_strRealName, slot);
 		}
-		if (v.m_clsid != 0 && val->GetClassType() != v.m_clsid) {
+		// Type check only for CONTEXT bindings (ThisObject / ThisForm) — a stable,
+		// typed self-handle worth validating against the compile-time stamp (its
+		// VALUE mutates, hence lazy access, but its TYPE is fixed). EXPORT bindings
+		// (RegisterRecords / Filter / Controls / DataSource) are loose: present or
+		// not, this type or that — no difference to the script, so the check is
+		// pointless there.
+		if (v.IsContext() && v.m_clsid != 0 && val->GetClassType() != v.m_clsid) {
 			ibBackendCoreException::Error(
 				_("Binding type mismatch for '%s': expected clsid %u, got %u"),
 				v.m_strRealName,
@@ -1613,7 +1650,13 @@ bool ibProcUnit::SetPropVal(const wxString& strPropName, const ibValue& varPropV
 
 bool ibProcUnit::GetPropVal(const long lPropNum, ibValue& pvarPropVal) //attribute value
 {
-	pvarPropVal = m_cCurContext.m_pRefLocVars[lPropNum];
+	// Dereference: copy the VALUE of the local-var slot. Assigning the bare
+	// ibValue* (operator=(ibValue*)) would make pvarPropVal a TYPE_REFFER to
+	// &m_pLocVars[lPropNum] — an element of the by-value local array, refcount
+	// 0. The caller's REFFER then DecrRefs it to 0 on destruction and runs
+	// `delete this` on a non-heap array element → heap corruption. All runtime
+	// access dereferences (locVariable macros); this must too.
+	pvarPropVal = *m_cCurContext.m_pRefLocVars[lPropNum];
 	return true;
 }
 
@@ -1621,7 +1664,7 @@ bool ibProcUnit::GetPropVal(const wxString& strPropName, ibValue& pvarPropVal) /
 {
 	const long lPropNum = FindProp(strPropName);
 	if (lPropNum != wxNOT_FOUND) {
-		pvarPropVal = m_cCurContext.m_pRefLocVars[lPropNum];
+		pvarPropVal = *m_cCurContext.m_pRefLocVars[lPropNum]; // value copy, not a REFFER to the array slot (see lPropNum overload)
 		return true;
 	}
 	return false;
@@ -1688,28 +1731,53 @@ bool ibProcUnit::Evaluate(const wxString& strExpression, ibRunContext* pRunConte
 
 	ibBackendException::ibEvalModeScope evalScope;
 
+	// Helper — render an exception into the watch result slot so the
+	// debugger panel can show *what* went wrong instead of an empty
+	// row + silent `false` return. Watch handler in the designer prints
+	// the result via ibValue::ToString; a string-typed ibValue with
+	// "<error: msg>" reads naturally.
+	auto reportFailure = [&pvarRetValue](const wxString& msg) {
+		pvarRetValue = ibValue(wxString(wxT("<error: ")) + msg + wxT(">"));
+	};
+
 	auto iterator = std::find_if(pRunContext->m_listEval.begin(), pRunContext->m_listEval.end(),
 		[strExpression](const auto pair) {return stringUtils::CompareString(strExpression, pair.first); });
 
 	std::shared_ptr<ibProcUnitEvaluate> runEvaluate = nullptr;
 	if (iterator == pRunContext->m_listEval.end()) { //this text has not yet been compiled
+		try {
+			auto compileExpression = std::make_unique<ibCompileEval>(pRunContext);
+			compileExpression->Load(strExpression);
 
-		auto compileExpression = std::make_unique<ibCompileEval>(pRunContext);
-		compileExpression->Load(strExpression);
+			auto evalUnit = std::make_shared<ibProcUnitEvaluate>();
+			// Transfer ownership BEFORE CompileExpression so the unique_ptr
+			// cleans up on any throw / failure path. No back-pointer wiring
+			// on bytecode side; eval finds its compileCode via GetCompileCode().
+			ibCompileCode& cModuleRef = *compileExpression;
+			evalUnit->TakeCompileCode(std::move(compileExpression));
+			if (!evalUnit->CompileExpression(pRunContext, pvarRetValue, cModuleRef, compileBlock)) {
+				// CompileExpression's own diagnostics path already wrote the
+				// reason into pvarRetValue when it can; if it's still empty
+				// (compile aborted without producing a value), fill in a
+				// generic note so the watch row isn't blank.
+				if (pvarRetValue.GetType() == ibValueTypes::TYPE_EMPTY)
+					reportFailure(_("compile failed"));
+				return false;
+			}
 
-		auto evalUnit = std::make_shared<ibProcUnitEvaluate>();
-		// Transfer ownership BEFORE CompileExpression so the unique_ptr
-		// cleans up on any throw / failure path. No back-pointer wiring
-		// on bytecode side; eval finds its compileCode via GetCompileCode().
-		ibCompileCode& cModuleRef = *compileExpression;
-		evalUnit->TakeCompileCode(std::move(compileExpression));
-		if (!evalUnit->CompileExpression(pRunContext, pvarRetValue, cModuleRef, compileBlock))
+			runEvaluate = evalUnit;
+
+			//everything is OK
+			pRunContext->m_listEval.insert_or_assign(stringUtils::MakeUpper(strExpression), runEvaluate);
+		}
+		catch (const ibBackendException& e) {
+			reportFailure(e.GetErrorDescription());
 			return false;
-
-		runEvaluate = evalUnit;
-
-		//everything is OK
-		pRunContext->m_listEval.insert_or_assign(stringUtils::MakeUpper(strExpression), runEvaluate);
+		}
+		catch (const std::exception& e) {
+			reportFailure(wxString::FromUTF8(e.what()));
+			return false;
+		}
 	}
 	else {
 		runEvaluate = iterator->second;
@@ -1726,7 +1794,16 @@ bool ibProcUnit::Evaluate(const wxString& strExpression, ibRunContext* pRunConte
 	try {
 		runEvaluate->Execute(&runEvaluate->m_cCurContext, &pvarRetValue, /*bDelta=*/false);
 	}
-	catch (const ibBackendException&) {
+	catch (const ibBackendException& e) {
+		// Carry the message into the watch result. Previous behaviour
+		// (bare `return false`) made the panel show a blank row for
+		// any runtime failure — user couldn't tell apart a deliberately-
+		// undefined identifier from a deadlock during the eval.
+		reportFailure(e.GetErrorDescription());
+		return false;
+	}
+	catch (const std::exception& e) {
+		reportFailure(wxString::FromUTF8(e.what()));
 		return false;
 	}
 
@@ -1775,6 +1852,15 @@ bool ibProcUnit::CompileExpression(ibRunContext* pRunContext, ibValue& pvarRetVa
 
 	cModule.m_cByteCode.m_listCode.push_back(code2);
 	cModule.m_cByteCode.m_lVarCount = cModule.m_rootContext->m_listVariable.size();
+
+	// Constants read-only — finalize sweep, mirrors ibCompileCode's normal
+	// finalize (compileCode.cpp). Must run here (after the eval pool is fully
+	// built), NOT at insertion: ibValue's move ctor drops m_bReadOnly
+	// (value.cpp:73), so a vector realloc would wipe an insert-time flag.
+	// Eval used to skip this entirely → a const arg read as writable and
+	// ResolveWrite hit DEF_VAR_CONST ("Attempt to write to a constant value").
+	for (auto& c : cModule.m_cByteCode.m_listConst)
+		c.m_bReadOnly = true;
 
 	//flag of compilation completion
 	cModule.m_cByteCode.m_bCompile = true;

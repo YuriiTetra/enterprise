@@ -6,12 +6,11 @@
 #include "globalContextManager.h"
 #include "backend/system/value/valueMap.h"
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueGlobalContextManager, ibValue);
 
 #include "backend/objCtor.h"
 
 class ibValueGlobalContextStructureManager : public ibValueStructure {
-public:
+	public:
 
 	ibValueGlobalContextStructureManager() : m_clsid(0), m_metaData(nullptr) {}
 	ibValueGlobalContextStructureManager(const ibClassID& clsid, ibMetaData* metaData)
@@ -22,8 +21,7 @@ public:
 			if (so == nullptr)
 				continue;
 			ibValuePtr<ibValue> createdValue(so->CreateObject());
-			if (createdValue != nullptr)
-				createdValue->PrepareNames();
+			// Name surface builds lazily on first GetPMethods() — no eager populate.
 			ibValueStructure::Insert(object->GetName(), createdValue);
 		}
 	}
@@ -48,10 +46,8 @@ private:
 
 	ibClassID m_clsid;
 
-	wxDECLARE_DYNAMIC_CLASS(ibValueGlobalContextStructureManager);
 };
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueGlobalContextStructureManager, ibValue);
 
 enum
 {
@@ -70,23 +66,21 @@ enum
 	enAccountingRegisters
 };
 
-void ibValueGlobalContextManager::PrepareNames() const
+void ibValueGlobalContextManager::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-
-	m_methodHelper->AppendProp(wxT("Constants"));
-	m_methodHelper->AppendProp(wxT("Catalogs"));
-	m_methodHelper->AppendProp(wxT("Documents"));
-	m_methodHelper->AppendProp(wxT("Enumerations"));
-	m_methodHelper->AppendProp(wxT("DataProcessors"));
-	m_methodHelper->AppendProp(wxT("ExternalDataProcessors"));
-	m_methodHelper->AppendProp(wxT("Reports"));
-	m_methodHelper->AppendProp(wxT("ExternalReports"));
-	m_methodHelper->AppendProp(wxT("InformationRegisters"));
-	m_methodHelper->AppendProp(wxT("AccumulationRegisters"));
-	m_methodHelper->AppendProp(wxT("ChartsOfCharacteristicTypes"));
-	m_methodHelper->AppendProp(wxT("ChartsOfAccounts"));
-	m_methodHelper->AppendProp(wxT("AccountingRegisters"));
+	helper.AppendProp(wxT("Constants"));
+	helper.AppendProp(wxT("Catalogs"));
+	helper.AppendProp(wxT("Documents"));
+	helper.AppendProp(wxT("Enumerations"));
+	helper.AppendProp(wxT("DataProcessors"));
+	helper.AppendProp(wxT("ExternalDataProcessors"));
+	helper.AppendProp(wxT("Reports"));
+	helper.AppendProp(wxT("ExternalReports"));
+	helper.AppendProp(wxT("InformationRegisters"));
+	helper.AppendProp(wxT("AccumulationRegisters"));
+	helper.AppendProp(wxT("ChartsOfCharacteristicTypes"));
+	helper.AppendProp(wxT("ChartsOfAccounts"));
+	helper.AppendProp(wxT("AccountingRegisters"));
 }
 
 #include "backend/metaCollection/partial/dataProcessorManager.h"
@@ -97,43 +91,43 @@ bool ibValueGlobalContextManager::GetPropVal(const long lPropNum, ibValue& pvarP
 	switch (lPropNum)
 	{
 	case enConstants:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaConstantCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaConstantCLSID, m_metaData);
 		return true;
 	case enCatalogs:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaCatalogCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaCatalogCLSID, m_metaData);
 		return true;
 	case enDocuments:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaDocumentCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaDocumentCLSID, m_metaData);
 		return true;
 	case enEnumerations:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaEnumerationCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaEnumerationCLSID, m_metaData);
 		return true;
 	case enDataProcessors:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaDataProcessorCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaDataProcessorCLSID, m_metaData);
 		return true;
 	case enExternalDataProcessors:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueManagerDataObjectExternalDataProcessor>();
+		pvarPropVal = new ibValueManagerDataObjectExternalDataProcessor();
 		return true;
 	case enReports:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaReportCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaReportCLSID, m_metaData);
 		return true;
 	case enExternalReports:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueManagerDataObjectExternalReport>();
+		pvarPropVal = new ibValueManagerDataObjectExternalReport();
 		return true;
 	case enInformationRegisters:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaInformationRegisterCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaInformationRegisterCLSID, m_metaData);
 		return true;
 	case enAccumulationRegisters:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaAccumulationRegisterCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaAccumulationRegisterCLSID, m_metaData);
 		return true;
 	case enChartsOfCharacteristicTypes:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaChartOfCharacteristicTypesCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaChartOfCharacteristicTypesCLSID, m_metaData);
 		return true;
 	case enChartsOfAccounts:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaChartOfAccountsCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaChartOfAccountsCLSID, m_metaData);
 		return true;
 	case enAccountingRegisters:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueGlobalContextStructureManager>(g_metaAccountingRegisterCLSID, m_metaData);
+		pvarPropVal = new ibValueGlobalContextStructureManager(g_metaAccountingRegisterCLSID, m_metaData);
 		return true;
 	}
 

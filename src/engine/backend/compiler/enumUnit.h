@@ -3,15 +3,13 @@
 
 #include "value.h"
 
-class BACKEND_API ibValueEnumerationWrapper : public ibValue {
-	ibValueMethodHelper* m_methodHelper;
+class BACKEND_API ibValueEnumerationWrapper : public ibValueDynamicMembers {
 public:
 
 	ibValueEnumerationWrapper(bool createInstance = false);
 	virtual ~ibValueEnumerationWrapper();
 
-	virtual ibValueMethodHelper* GetPMethods() const { return m_methodHelper; }
-	virtual void PrepareNames() const;
+	void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 	virtual ibValue* GetEnumVariantValue() const = 0;
 	virtual wxString GetClassName() const = 0;
@@ -27,7 +25,7 @@ protected:
 
 template <typename valT>
 class ibValueEnumerationVariantBase : public ibValue {
-public:
+	public:
 
 	ibValueEnumerationVariantBase() : ibValue(ibValueTypes::TYPE_ENUM, true) {}
 
@@ -41,7 +39,7 @@ public:
 
 template <typename valT>
 class ibValueEnumerationBase : public ibValueEnumerationWrapper {
-public:
+	public:
 
 	ibValueEnumerationBase(bool createInstance = false) :
 		ibValueEnumerationWrapper(createInstance)
@@ -66,6 +64,7 @@ public:
 //default base class for all enumerations
 template <typename valT>
 class ibValueEnumeration : public ibValueEnumerationBase<valT> {
+	public:
 	std::map<valT, wxString> m_listEnumData, m_listEnumDesc;
 protected:
 
@@ -226,9 +225,11 @@ public:
 		return nullptr;
 	}
 
-	//initialize enumeration 
+	//initialize enumeration
 	void InitializeEnumeration() {
-		this->PrepareNames();
+		// Names surface lazily from FillMembers (Build on first GetPMethods);
+		// m_listEnumStr is already populated by AddEnumeration above.
+		this->m_members.Invalidate();
 	}
 
 	void InitializeEnumeration(const valT& v) {

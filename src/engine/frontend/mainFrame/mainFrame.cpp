@@ -12,7 +12,7 @@
 #include "frontend/session/guiSession.h"
 
 //common 
-#include "frontend/docView/docManager.h"
+#include "frontend/docView/docView.h"
 #include "frontend/mainFrame/objinspect/objinspect.h"
 
 #include "frontend/win/theme/luna_tabart.h"
@@ -22,9 +22,9 @@
 //*                                 mainFrame                                       *
 //***********************************************************************************
 
-ibFrontendDocMDIFrame* ibFrontendDocMDIFrame::s_instance = nullptr;
+ibFrontendMainFrame* ibFrontendMainFrame::s_instance = nullptr;
 
-void ibFrontendDocMDIFrame::InitFrame(ibFrontendDocMDIFrame* frame)
+void ibFrontendMainFrame::InitFrame(ibFrontendMainFrame* frame)
 {
 	if (s_instance == nullptr && frame != nullptr) {
 		s_instance = frame;
@@ -32,7 +32,7 @@ void ibFrontendDocMDIFrame::InitFrame(ibFrontendDocMDIFrame* frame)
 	}
 }
 
-bool ibFrontendDocMDIFrame::ShowFrame()
+bool ibFrontendMainFrame::ShowFrame()
 {
 	if (s_instance != nullptr && !s_instance->IsShown() && !ibSession::IsCurrentForceExit()) {
 
@@ -54,7 +54,7 @@ bool ibFrontendDocMDIFrame::ShowFrame()
 	return false;
 }
 
-void ibFrontendDocMDIFrame::DestroyFrame()
+void ibFrontendMainFrame::DestroyFrame()
 {
 	if (s_instance != nullptr) {
 		s_instance->Destroy();
@@ -65,11 +65,11 @@ void ibFrontendDocMDIFrame::DestroyFrame()
 //*                                 Constructor                                     *
 //***********************************************************************************
 
-ibFrontendDocMDIFrame::ibFrontendDocMDIFrame(const wxString& title,
+ibFrontendMainFrame::ibFrontendMainFrame(const wxString& title,
 	const wxPoint& pos,
 	const wxSize& size,
 	long style,
-	const wxString& strName) : wxDocParentFrameAnyBase(this),
+	const wxString& strName) : ibDocParentFrameAnyBase(this),
 	m_objectInspector(nullptr), m_docToolbar(nullptr), m_mainFrameToolbar(nullptr),
 	m_callRaiseFrame(false), m_callUpdateFrameManager(false)
 {
@@ -78,7 +78,7 @@ ibFrontendDocMDIFrame::ibFrontendDocMDIFrame(const wxString& title,
 
 #include "backend/compiler/value.h"
 
-bool ibFrontendDocMDIFrame::Create(const wxString& title,
+bool ibFrontendMainFrame::Create(const wxString& title,
 	const wxPoint& pos,
 	const wxSize& size,
 	long style,
@@ -89,8 +89,8 @@ bool ibFrontendDocMDIFrame::Create(const wxString& title,
 
 	m_docManager = nullptr;
 
-	this->Bind(wxEVT_MENU, &ibFrontendDocMDIFrame::OnExit, this, wxID_EXIT);
-	this->Bind(wxEVT_CLOSE_WINDOW, &ibFrontendDocMDIFrame::OnCloseWindow, this);
+	this->Bind(wxEVT_MENU, &ibFrontendMainFrame::OnExit, this, wxID_EXIT);
+	this->Bind(wxEVT_CLOSE_WINDOW, &ibFrontendMainFrame::OnCloseWindow, this);
 
 	this->SetArtProvider(new wxAuiLunaTabArt());
 
@@ -98,16 +98,29 @@ bool ibFrontendDocMDIFrame::Create(const wxString& title,
 	m_mgr.SetManagedWindow(this);
 	m_mgr.SetArtProvider(new wxAuiLunaDockArt());
 
+	// Disable live pane-border resize — wxAUI_MGR_LIVE_RESIZE is part
+	// of wxAUI_MGR_DEFAULT and triggers a full Layout pass through
+	// every pane on every mouse-move during border drag, which is
+	// expensive on complex pane content (Syntax Helper especially)
+	// and shows up as a "jelly" lag. Ghost-rect drag + commit on
+	// mouse-up matches VS / Eclipse and stays lag-free.
+	m_mgr.SetFlags(m_mgr.GetFlags() & ~wxAUI_MGR_LIVE_RESIZE);
+
 #ifdef __WXMSW__
 	SetIcon(wxICON(oes));
 #endif
 	return true;
 }
 
-ibFrontendWindow* ibFrontendDocMDIFrame::CreateChildFrame(ibMetaView* view, const wxPoint& pos, const wxSize& size, long style)
+ibFrontendWindow* ibFrontendMainFrame::CreateChildFrame(ibView* view, const wxPoint& pos, const wxSize& size, long style)
 {
-	// create a child valueForm of appropriate class for the current mode
-	ibMetaDocument* document = view->GetDocument();
+	// create a child valueForm of appropriate class for the current mode.
+	// Parameter and back-ref type relaxed from ibMetaView*/ibMetaDocument*
+	// to ibView*/ibDocument* so the factory can serve plain (non-meta)
+	// documents too — required after AuditLog / Text / Help were rebased
+	// off the meta hierarchy. The child-frame ctors already accept the
+	// base ibDocument*.
+	ibDocument* document = view->GetDocument();
 
 	if ((style & wxCREATE_SDI_FRAME) != 0) {
 
@@ -121,20 +134,26 @@ ibFrontendWindow* ibFrontendDocMDIFrame::CreateChildFrame(ibMetaView* view, cons
 			}
 		}
 
+		wxIcon docIcon = document->GetIcon();
+
 		ibDialogDocChildFrame* subframe = new ibDialogDocChildFrame(document, view, parent, wxID_ANY, document->GetTitle(), pos, size, style & ~wxCREATE_SDI_FRAME);
-		subframe->SetIcon(document->GetIcon());
+		if (docIcon.IsOk())
+			subframe->SetIcon(docIcon);
 		subframe->SetExtraStyle(wxWS_EX_BLOCK_EVENTS);
 		subframe->Center();
 		return subframe;
 	}
 
-	CAuiDocChildFrame* subframe = new CAuiDocChildFrame(document, view, s_instance, wxID_ANY, document->GetTitle(), pos, size, style);
-	subframe->SetIcon(document->GetIcon());
+	wxIcon docIcon = document->GetIcon();
+
+	ibAuiDocChildFrame* subframe = new ibAuiDocChildFrame(document, view, s_instance, wxID_ANY, document->GetTitle(), pos, size, style);
+	if (docIcon.IsOk())
+		subframe->SetIcon(docIcon);
 	subframe->SetExtraStyle(wxWS_EX_BLOCK_EVENTS);
 	return subframe;
 }
 
-void ibFrontendDocMDIFrame::RefreshFrame()
+void ibFrontendMainFrame::RefreshFrame()
 {
 	if (m_docManager != nullptr) {
 		for (auto& doc : m_docManager->GetDocumentsVector())
@@ -144,12 +163,12 @@ void ibFrontendDocMDIFrame::RefreshFrame()
 	Refresh();
 }
 
-void ibFrontendDocMDIFrame::RaiseFrame()
+void ibFrontendMainFrame::RaiseFrame()
 {
-	if (!m_callRaiseFrame && ibFrontendDocMDIFrame::IsFocusable()) {
+	if (!m_callRaiseFrame && ibFrontendMainFrame::IsFocusable()) {
 		CallAfter([&]() {
 			if (!ibSession::IsCurrentForceExit())
-				ibFrontendDocMDIFrame::Raise();
+				ibFrontendMainFrame::Raise();
 			m_callRaiseFrame = false;
 			}
 		);
@@ -158,7 +177,7 @@ void ibFrontendDocMDIFrame::RaiseFrame()
 }
 
 #if wxUSE_MENUS
-void ibFrontendDocMDIFrame::SetMenuBar(wxMenuBar* pMenuBar)
+void ibFrontendMainFrame::SetMenuBar(wxMenuBar* pMenuBar)
 {
 	if (m_pMyMenuBar == nullptr) {
 
@@ -173,7 +192,7 @@ void ibFrontendDocMDIFrame::SetMenuBar(wxMenuBar* pMenuBar)
 }
 #endif // wxUSE_MENUS
 
-wxAuiMDIClientWindow* ibFrontendDocMDIFrame::OnCreateClient()
+wxAuiMDIClientWindow* ibFrontendMainFrame::OnCreateClient()
 {
 	class wxAuiMDIClientWindowImpl : public wxAuiMDIClientWindow {
 	public:
@@ -185,9 +204,16 @@ wxAuiMDIClientWindow* ibFrontendDocMDIFrame::OnCreateClient()
 			SetBackgroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_APPWORKSPACE));
 			if (GetBackgroundStyle() != wxBG_STYLE_TRANSPARENT)
 				SetBackgroundStyle(wxBG_STYLE_SYSTEM);
+#else
+			// Powder-blue workspace — interior-design dominant
+			// chrome tone (the "walls" of the application). Forms /
+			// docs sit on this as a calm cool backdrop. The historical
+			// dark-navy AppWorkspace would otherwise leak through, so
+			// we override both paint + erase below.
+			SetBackgroundColour(wxColour(184, 201, 212));  // #B8C9D4 powder blue
+#endif
 			Bind(wxEVT_PAINT, &wxAuiMDIClientWindowImpl::OnPaint, this);
 			Bind(wxEVT_ERASE_BACKGROUND, &wxAuiMDIClientWindowImpl::OnEraseBackground, this);
-#endif
 		}
 
 	protected:
@@ -200,7 +226,6 @@ wxAuiMDIClientWindow* ibFrontendDocMDIFrame::OnCreateClient()
 			return selection;
 		}
 
-#ifdef __WXOSX__
 		void OnPaint(wxPaintEvent& event) {
 			wxPaintDC dc(this);
 			dc.SetBackground(wxBrush(GetBackgroundColour()));
@@ -215,14 +240,13 @@ wxAuiMDIClientWindow* ibFrontendDocMDIFrame::OnCreateClient()
 				dc->Clear();
 			}
 		}
-#endif
 	};
 
 	return new wxAuiMDIClientWindowImpl(this);
 }
 
 // bring window to front
-void ibFrontendDocMDIFrame::Raise()
+void ibFrontendMainFrame::Raise()
 {
 #if __WXMSW__
 	// Simulate a key press
@@ -233,7 +257,7 @@ void ibFrontendDocMDIFrame::Raise()
 	wxAuiMDIParentFrame::Raise();
 }
 
-bool ibFrontendDocMDIFrame::Destroy()
+bool ibFrontendMainFrame::Destroy()
 {
 	wxAuiMDIClientWindow* client_window = GetClientWindow();
 	wxCHECK_MSG(client_window, false, wxS("Missing MDI Client Window"));
@@ -256,7 +280,7 @@ bool ibFrontendDocMDIFrame::Destroy()
 		wxAuiMDIParentFrame::Destroy();
 }
 
-ibFrontendDocMDIFrame::~ibFrontendDocMDIFrame()
+ibFrontendMainFrame::~ibFrontendMainFrame()
 {
 	if (s_instance == this) s_instance = nullptr;
 
@@ -268,7 +292,7 @@ ibFrontendDocMDIFrame::~ibFrontendDocMDIFrame()
 	m_mgr.UnInit();
 }
 
-void ibFrontendDocMDIFrame::UpdateFrameManager()
+void ibFrontendMainFrame::UpdateFrameManager()
 {
 	unsigned int view_count = 0;
 
@@ -297,12 +321,12 @@ void ibFrontendDocMDIFrame::UpdateFrameManager()
 //*                                    System                                    *
 //********************************************************************************
 
-void ibFrontendDocMDIFrame::OnExit(wxCommandEvent& WXUNUSED(event))
+void ibFrontendMainFrame::OnExit(wxCommandEvent& WXUNUSED(event))
 {
 	this->Close();
 }
 
-void ibFrontendDocMDIFrame::OnCloseWindow(wxCloseEvent& event)
+void ibFrontendMainFrame::OnCloseWindow(wxCloseEvent& event)
 {
 	bool allowClose = event.CanVeto() ? AllowClose() : true;
 	// The user decided not to close finally, abort.

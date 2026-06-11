@@ -4,7 +4,6 @@
 //*                           IMPLEMENT_DYNAMIC_CLASS                               *
 //***********************************************************************************
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueHTMLBox, ibValueWindow);
 
 //***********************************************************************************
 //*                                 Value Notebook                                  *
@@ -12,6 +11,7 @@ wxIMPLEMENT_DYNAMIC_CLASS(ibValueHTMLBox, ibValueWindow);
 
 ibValueHTMLBox::ibValueHTMLBox() : ibValueWindow()
 {
+	m_members.Bind(this, &ibValueHTMLBox::FillControlMembers);
 	m_propertyMinSize->SetValue(wxSize(250, 150));
 }
 
@@ -74,17 +74,15 @@ enum Func {
 	enSetPage = 0,
 };
 
-void ibValueHTMLBox::PrepareNames() const // this method is automatically called to initialize attribute and method names.
+void ibValueHTMLBox::FillControlMembers(ibMemberTable& helper) const
 {
-	ibValueFrame::PrepareNames();
-
-	m_methodHelper->AppendFunc(wxT("SetPage"), 1, wxT("SetPage(p: page)"), enSetPage, wxNOT_FOUND);
+	helper.AppendFunc(wxT("SetPage"), 1, wxT("SetPage(p: page)"), enSetPage, wxNOT_FOUND);
 }
 
 bool ibValueHTMLBox::CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray)       //method call
 {
 	wxHtmlWindow* htmlBox = dynamic_cast<wxHtmlWindow*>(GetWxObject());
-	switch (m_methodHelper->GetMethodData(lMethodNum))
+	switch (m_members.GetMethodData(lMethodNum))
 	{
 	case enSetPage:
 		pvarRetValue = htmlBox ?

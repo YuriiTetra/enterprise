@@ -743,8 +743,7 @@ private:
 // (q2 = q.Where(...); iterate both q and q2 interleaved) shares
 // upstream state and will misbehave — deferred to Phase 2.
 class ibValueQuery : public ibValue {
-	wxDECLARE_DYNAMIC_CLASS(ibValueQuery);
-public:
+	public:
 	ibValueQuery() : ibValue(ibValueTypes::TYPE_VALUE) {}
 
 	explicit ibValueQuery(std::shared_ptr<ibValueIteratorState> state)
@@ -764,11 +763,10 @@ private:
 	std::shared_ptr<ibValueIteratorState> m_state;
 };
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueQuery, ibValue);
 
 const ibClassID g_valueQuery = string_to_clsid("VL_QRY");
 
-SYSTEM_TYPE_REGISTER(ibValueQuery, "Query", g_valueQuery);
+SYSTEM_TYPE_REGISTER(ibValueQuery, "LinqQuery", g_valueQuery);
 
 // LINQ dispatcher — reached via the OPER_CALL_LINQ handler in Execute,
 // which reads the ibLinqMethod enum id from m_param3.m_numIndex and
@@ -799,6 +797,20 @@ static void ibValueLinqDispatchImpl(ibValue* self, ibValue::ibLinqMethod method,
 	// for free.
 	std::shared_ptr<ibValueIteratorState> upstream = self->CreateIterator();
 	if (!upstream) {
+		// NOT a LINQ source — but the value may OWN a method of this name (a LINQ-operator name like
+		// Select / Where is not reserved: e.g. Query's QueryResult.Select() opens the selection). Resolve
+		// the operator's script NAME against the value's own members; if it has it, the `.Select(...)` was
+		// meant as that method, not a pipeline op — dispatch there. This is the context the caller asked
+		// for: a LINQ-chain Select stays LINQ, a Select on a value that defines one calls the value's.
+		wxString methodName;
+		for (const auto& info : ibValue::GetLinqMethodTable())
+			if (info.id == method) { methodName = info.name; break; }
+		const long ownNum = methodName.IsEmpty() ? -1 : self->FindMethod(methodName);
+		if (ownNum >= 0) {
+			if (self->HasRetVal(ownNum)) self->CallAsFunc(ownNum, ret, args, n);
+			else                         self->CallAsProc(ownNum, args, n);
+			return;
+		}
 		ibBackendCoreException::Error(_("LINQ: value is not iterable"));
 	}
 
@@ -1022,7 +1034,7 @@ static void ibValueLinqDispatchImpl(ibValue* self, ibValue::ibLinqMethod method,
 			if (count == 0 && method == M::Single)
 				ibBackendCoreException::Error(_("LINQ: Single() on empty sequence"));
 			if (count > 1)
-				ibBackendCoreException::Error(_("LINQ: Single() — sequence contains more than one element"));
+				ibBackendCoreException::Error(_("LINQ: Single() - sequence contains more than one element"));
 			CopyValue(ret, count == 1 ? first : ibValue());
 			break;
 		}
@@ -1040,7 +1052,7 @@ static void ibValueLinqDispatchImpl(ibValue* self, ibValue::ibLinqMethod method,
 			const long idx = (long)args[0]->GetNumber().ToInt64();
 			if (idx < 0) {
 				if (method == M::ElementAt)
-					ibBackendCoreException::Error(_("LINQ: ElementAt — negative index"));
+					ibBackendCoreException::Error(_("LINQ: ElementAt - negative index"));
 				CopyValue(ret, ibValue());
 				break;
 			}
@@ -1052,7 +1064,7 @@ static void ibValueLinqDispatchImpl(ibValue* self, ibValue::ibLinqMethod method,
 				++pos;
 			}
 			if (!found && method == M::ElementAt)
-				ibBackendCoreException::Error(_("LINQ: ElementAt — index out of range"));
+				ibBackendCoreException::Error(_("LINQ: ElementAt - index out of range"));
 			CopyValue(ret, found ? current : ibValue());
 			break;
 		}
@@ -1122,6 +1134,13 @@ static void ibValueLinqDispatchImpl(ibValue* self, ibValue::ibLinqMethod method,
 			break;
 		}
 
+		case M::ToTable:
+			// Meaningful only on a data source (Data.* / Queryable, which overrides the
+			// dispatch) — a plain RAM iterable has no column schema to materialise.
+			ibBackendCoreException::Error(
+				_("LINQ: ToTable is supported on data sources (Data.*) only"));
+			break;
+
 		default:
 			ibBackendCoreException::Error(
 				_("LINQ: unknown method index %ld"), realNum);
@@ -1137,7 +1156,7 @@ static void ibValueLinqDispatchImpl(ibValue* self, ibValue::ibLinqMethod method,
 void ibValue::DispatchLinqMethod(ibLinqMethod method, ibValue& ret,
                                   ibValue** args, long n)
 {
-	if (m_typeClass == ibValueTypes::TYPE_REFFER && m_pRef != nullptr && m_pRef != this) {
+	if (IsReference() && m_pRef != nullptr && m_pRef != this) {
 		m_pRef->DispatchLinqMethod(method, ret, args, n);
 		return;
 	}
@@ -1191,6 +1210,7 @@ const std::vector<ibValue::ibLinqMethodInfo>& ibValue::GetLinqMethodTable() {
 		{ M::Aggregate,           L"Aggregate",           L"Fold via Aggregate(seed, λ(acc, elem) → acc)" },
 		{ M::WhereIndexed,        L"WhereIndexed",        L"Filter with index — λ(elem, index) → bool" },
 		{ M::SelectIndexed,       L"SelectIndexed",       L"Project with index — λ(elem, index) → newElem" },
+		{ M::ToTable,             L"ToTable",             L"Materialise a data source into a value table (Queryable)" },
 	};
 	return table;
 }

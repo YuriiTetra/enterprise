@@ -1859,7 +1859,7 @@ bool ibDataViewCtrl::DoItemInserted(const ibDataViewItem& parent, const ibDataVi
 			// There's no sorting, so we need to select an insertion position
 
 			ibDataViewItemArray modelSiblings;
-			GetModel()->GetChildren(parent, modelSiblings);
+			GetModel()->GetFirstFetch(parent, ibDataViewItem(), -1, modelSiblings);
 			const int modelSiblingsSize = modelSiblings.size();
 
 			// Pointer-identity search: ibDataViewItemArray::Index uses
@@ -3387,7 +3387,14 @@ static void BuildHierarchicalHelper(ibDataViewCtrl* window, const ibDataViewMode
 static void BuildTreeHelper(ibDataViewCtrl* window, const ibDataViewModel* model,
 	const ibDataViewItem& item, ibDataViewTreeNode* node)
 {
-	if (!item.IsContainer())
+	// Skip only real leaf items — the invisible root passed in by
+	// BuildTree() is an empty (Mode::Empty) ibDataViewItem whose
+	// IsContainer() returns false unconditionally, so the bare
+	// `!item.IsContainer()` check used to bail out before fetching
+	// the top-level rows. That left Tree-mode controls empty after
+	// Cleared() / AssociateModel re-fires (paths that pass through
+	// here with the empty root). Treat the empty root as a container.
+	if (item.IsOk() && !item.IsContainer())
 		return;
 
 	ibDataViewItemArray children;
@@ -3770,6 +3777,12 @@ void ibDataViewCtrl::UpdateColumnSizes()
 		if (availableWidth < wxMax(lastCol->GetMinWidth(),
 			lastCol->WXGetSpecifiedWidth()))
 		{
+			// The remaining space can't hold the last column at its minimum
+			// width — content overflows the viewport. Publish the real total
+			// width so the horizontal scrollbar appears; a bare return would
+			// leave a stale virtual width (possibly 0 from an earlier "fits"
+			// pass) and hide the scrollbar even though there's content to scroll.
+			m_tableAreaWin->SetVirtualSize(colswidth, m_tableAreaWin->GetVirtualSize().y);
 			return;
 		}
 
@@ -3810,6 +3823,18 @@ wxEND_EVENT_TABLE()
 
 void ibDataViewCtrl::OnScrollEvent(wxScrollWinEvent& event)
 {
+	// Horizontal scrolling (column overflow) is plain wxScrollHelper
+	// territory — pass it straight through to the default handler.  The
+	// paged 3-state lying-scrollbar logic below is VERTICAL-only; before
+	// the orientation guard it also caught horizontal events, so a paged
+	// model swallowed the horizontal thumb drag (THUMBRELEASE returns
+	// without event.Skip()) and mis-routed horizontal line/page events
+	// into vertical PagedFetch — which is exactly why column scroll broke
+	// once the custom scrollbar landed.
+	if (event.GetOrientation() != wxVERTICAL) {
+		event.Skip();
+		return;
+	}
 	ibDataViewModel* model = GetModel();
 	if (model != nullptr && model->IsPagedModel() && m_tableAreaWin != nullptr) {
 		const int  countPerPage = GetCountPerPage();
@@ -3950,7 +3975,12 @@ void ibDataViewCtrl::Init()
 	m_editorRenderer = NULL;
 	m_selectionMode = ibDataViewSelectionMode::ibDataViewSelectRow;
 
-	m_viewMode = ibDataViewViewMode::ibDataViewTree;
+	// Default view mode = flat List.  Tree mode requires per-row
+	// IsContainer guards (BuildTreeHelper) that bail on a flat
+	// list's invalid root item, leaving the control empty even when
+	// the model has rows.  Callers that need tree semantics flip via
+	// SetViewMode after construction.
+	m_viewMode = ibDataViewViewMode::ibDataViewList;
 
 	m_lastOnSame = false;
 	m_renameTimer = new ibDataViewRenameTimer(this);
@@ -4430,6 +4460,33 @@ void ibDataViewCtrl::CalcWindowSizes()
 		// Update the last column size to take all the available space. Note that
 		// this must be done after calling Layout() to update m_tableAreaWin size.
 
+		// Scroll-rate rationale.  AdjustScrollbars()
+		// derives the scrollbar range as virtualSize / pixelsPerLine, so
+		// with a 0 rate it emits range == 0 and NO scrollbar appears even when
+		// the virtual width overflows the client.  The x-rate was previously
+		// only set by RecalculateDisplay(), which fires on m_dirty — for a
+		// non-paged control (e.g. a document-form tablebox) that seldom runs
+		// after the first layout, so every resize went through CalcWindowSizes
+		// → AdjustScrollbars() with a stale 0 x-rate and the horizontal
+		// scrollbar never showed despite overflowing columns.  (Diagnosed:
+		// virtX=1647 vs clientX=611, yet SetScrollbar range=0.)
+		//
+		// Set ONLY the x-rate; preserve the current y-rate.  Forcing a y-rate
+		// here would enable the vertical scrollbar for controls that never had
+		// one (y-rate stays 0 until RecalculateDisplay sets it), making it pop
+		// up spuriously — e.g. the small designer tablebox preview where any
+		// content overflows the tiny rows area.  Vertical stays owned by
+		// RecalculateDisplay (non-paged) / the lying paged scrollbar (paged).
+		// Apply synchronously, NOT deferred to idle.  Deferring the scrollbar
+		// geometry to OnInternalIdle crashed / glitched designer column-add and
+		// resize: the deferred AdjustScrollbars ran a tick later, after the
+		// column array / control state had already moved on.  Set ONLY the
+		// x-rate; preserve the current y-rate (see rationale above).
+		int curXUnit = 0, curYUnit = 0;
+		GetScrollPixelsPerUnit(&curXUnit, &curYUnit);
+		const int wantXUnit = FromDIP(10);
+		if (curXUnit != wantXUnit)
+			SetScrollRate(wantXUnit, curYUnit);
 		UpdateColumnSizes();
 		AdjustScrollbars();
 

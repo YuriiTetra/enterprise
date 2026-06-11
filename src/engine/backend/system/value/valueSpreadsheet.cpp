@@ -6,13 +6,11 @@
 
 #include "backend/system/value/valueMap.h"
 
-void ibValueSpreadsheetDocumentBorder::PrepareNames() const
+void ibValueSpreadsheetDocumentBorder::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper.ClearHelper();
-
-	m_methodHelper.AppendProp(wxT("Style"));
-	m_methodHelper.AppendProp(wxT("Colour"));
-	m_methodHelper.AppendProp(wxT("Width"));
+	helper.AppendProp(wxT("Style"));
+	helper.AppendProp(wxT("Colour"));
+	helper.AppendProp(wxT("Width"));
 }
 
 bool ibValueSpreadsheetDocumentBorder::SetPropVal(const long lPropNum, const ibValue& varPropVal)
@@ -30,7 +28,7 @@ bool ibValueSpreadsheetDocumentBorder::GetPropVal(const long lPropNum, ibValue& 
 		pvarPropVal = ibValue::CreateEnumObject<ibValueEnumSpreadsheetBorder>(m_style);
 		return true;
 	case enPropColour:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueColour>(m_colour);
+		pvarPropVal = new ibValueColour(m_colour);
 		return true;
 	case enPropWidth:
 		pvarPropVal = m_width;
@@ -40,8 +38,16 @@ bool ibValueSpreadsheetDocumentBorder::GetPropVal(const long lPropNum, ibValue& 
 	return false;
 }
 
+static void ibValueSpreadsheetDocumentRange_BindNames(ibValue::ibMemberTable& helper, const ibValue* /*ctx*/)
+{
+	helper.AppendProp(wxT("Label"));
+	helper.AppendProp(wxT("Start"));
+	helper.AppendProp(wxT("End"));
+}
+
 class ibValueSpreadsheetDocumentRange :
-	public ibValue {
+	public ibValueStaticMembers<&ibValueSpreadsheetDocumentRange_BindNames> {
+	public:
 
 	enum
 	{
@@ -52,8 +58,8 @@ class ibValueSpreadsheetDocumentRange :
 
 public:
 
-	ibValueSpreadsheetDocumentRange() : ibValue(ibValueTypes::TYPE_VALUE), m_label(), m_start(-1), m_end(-1) {}
-	ibValueSpreadsheetDocumentRange(const wxString& label, int start, int end) : ibValue(ibValueTypes::TYPE_VALUE), m_label(label), m_start(start), m_end(end) {}
+	ibValueSpreadsheetDocumentRange() : ibValueStaticMembers(ibValueTypes::TYPE_VALUE), m_label(), m_start(-1), m_end(-1) {}
+	ibValueSpreadsheetDocumentRange(const wxString& label, int start, int end) : ibValueStaticMembers(ibValueTypes::TYPE_VALUE), m_label(label), m_start(start), m_end(end) {}
 
 	virtual bool IsEmpty() const { return false; }
 
@@ -76,30 +82,18 @@ public:
 		return false;
 	}
 
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return &m_methodHelper;
-	}
-
-	virtual void PrepareNames() const { // this method is automatically called to initialize attribute and method names
-		m_methodHelper.ClearHelper();
-		m_methodHelper.AppendProp(wxT("Label"));
-		m_methodHelper.AppendProp(wxT("Start"));
-		m_methodHelper.AppendProp(wxT("End"));
-	}
+	// DoGetPMethods (protected) + Shared<&ibValueSpreadsheetDocumentRange_BindNames> come from the base.
 
 private:
 
 	const wxString m_label;
 	const int m_start, m_end;
 
-	static ibValueMethodHelper m_methodHelper;
-
-	wxDECLARE_DYNAMIC_CLASS(ibValueSpreadsheetDocumentRange);
 };
 
 class ibValueSpreadsheetDocumentAreaCollection :
 	public ibValueStructure {
+	public:
 
 public:
 
@@ -116,17 +110,17 @@ public:
 			if (area == nullptr)
 				continue;
 			ibValueStructure::Insert(area->m_label,
-				ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocumentRange>(area->m_label, area->m_start, area->m_end));
+				new ibValueSpreadsheetDocumentRange(area->m_label, area->m_start, area->m_end));
 		}
 	}
 
 private:
 
 	wxObjectDataPtr<ibBackendSpreadsheetObject> m_spreadsheetDoc;
-	wxDECLARE_DYNAMIC_CLASS(ibValueSpreadsheetDocumentAreaCollection);
 };
 
-class ibValueSpreadsheetDocumentParameterCollection : public ibValue {
+class ibValueSpreadsheetDocumentParameterCollection : public ibValueDynamicMembers {
+	public:
 
 	enum
 	{
@@ -178,26 +172,28 @@ class ibValueSpreadsheetDocumentParameterCollection : public ibValue {
 public:
 
 	ibValueSpreadsheetDocumentParameterCollection() :
-		ibValue(ibValueTypes::TYPE_VALUE), m_methodHelper(nullptr)
+		ibValueDynamicMembers(ibValueTypes::TYPE_VALUE)
 	{
+		// No doc → no parameters; leave the helper empty (no binder).
 	}
 
 	ibValueSpreadsheetDocumentParameterCollection(const wxObjectDataPtr<ibBackendSpreadsheetObject>& spreadsheetDoc) :
-		ibValue(ibValueTypes::TYPE_VALUE), m_spreadsheetDoc(spreadsheetDoc), m_methodHelper(new ibValueMethodHelper)
+		ibValueDynamicMembers(ibValueTypes::TYPE_VALUE), m_spreadsheetDoc(spreadsheetDoc)
 	{
+		m_members.Bind(this, &ibValueSpreadsheetDocumentParameterCollection::FillMembers);
 	}
 
-	virtual ~ibValueSpreadsheetDocumentParameterCollection() { wxDELETE(m_methodHelper); }
+	virtual ~ibValueSpreadsheetDocumentParameterCollection() {}
 
 	virtual bool IsEmpty() const { return false; }
 
 	virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal) {
-		m_spreadsheetDoc->SetParameter(m_methodHelper->GetPropName(lPropNum), varPropVal);
+		m_spreadsheetDoc->SetParameter(m_members.GetPropName(lPropNum), varPropVal);
 		return true;
 	}
 
 	virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal) {
-		m_spreadsheetDoc->GetParameter(m_methodHelper->GetPropName(lPropNum), pvarPropVal);
+		m_spreadsheetDoc->GetParameter(m_members.GetPropName(lPropNum), pvarPropVal);
 		return true;
 	}
 
@@ -206,7 +202,7 @@ public:
 		switch (lMethodNum)
 		{
 		case enCount:
-			pvarRetValue = ibValue(ibNumber(m_methodHelper ? static_cast<int>(m_methodHelper->GetNProps()) : 0));
+			pvarRetValue = ibValue(ibNumber(static_cast<int>(GetPMethods()->GetNProps())));
 			return true;
 		case enGet:
 			m_spreadsheetDoc->GetParameter(paParams[0]->GetString(), pvarRetValue);
@@ -222,9 +218,10 @@ public:
 		{
 		case enFill:
 		{
-			ibValueMethodHelper* methodHelper = paParams[0]->GetPMethods();
+			ibMemberTable* methodHelper = paParams[0]->GetPMethods();
 			if (methodHelper != nullptr) {
-				for (int lPropPos = 0; lPropPos < m_methodHelper->GetNProps(); lPropPos++) {
+				const long lSelfProps = GetPMethods()->GetNProps();
+				for (int lPropPos = 0; lPropPos < lSelfProps; lPropPos++) {
 					if (lPropPos >= methodHelper->GetNProps())
 						continue;
 					const wxString& strPropName = methodHelper ->GetPropName(lPropPos);
@@ -247,12 +244,7 @@ public:
 		return false;
 	}
 
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return m_methodHelper;
-	}
-
-	virtual void PrepareNames() const { // this method is automatically called to initialize attribute and method names.
+	void FillMembers(ibMemberTable& helper) const {   // bound in ctor (was PrepareNames)
 
 		// Define the comparator struct
 		struct wxCompareStringFunc {
@@ -262,12 +254,10 @@ public:
 			}
 		};
 
-		m_methodHelper->ClearHelper();
-
-		m_methodHelper->AppendFunc(wxT("Count"), wxT("Count"));
-		m_methodHelper->AppendProc(wxT("Fill"), 1, wxT("Fill(any : value)"));
-		m_methodHelper->AppendFunc(wxT("Get"), 1, wxT("Get(parameter: string)"));
-		m_methodHelper->AppendProc(wxT("Set"), 2, wxT("Set(parameter: string, any: value)"));
+		helper.AppendFunc(wxT("Count"), wxT("Count"));
+		helper.AppendProc(wxT("Fill"), 1, wxT("Fill(any : value)"));
+		helper.AppendFunc(wxT("Get"), 1, wxT("Get(parameter: string)"));
+		helper.AppendProc(wxT("Set"), 2, wxT("Set(parameter: string, any: value)"));
 
 		std::set<wxString, wxCompareStringFunc> arrParameter;
 
@@ -287,33 +277,18 @@ public:
 			if (!cell->IsEmptyParameter()) arrParameter.insert(cell->m_detailsParameter);
 		}
 
-		for (auto p : arrParameter) m_methodHelper->AppendProp(p);
+		for (auto p : arrParameter) helper.AppendProp(p);
 	}
 
 private:
 
 	wxObjectDataPtr<ibBackendSpreadsheetObject> m_spreadsheetDoc;
-	ibValueMethodHelper* m_methodHelper;
-	wxDECLARE_DYNAMIC_CLASS(ibValueSpreadsheetDocumentParameterCollection);
 };
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueSpreadsheetDocumentRange, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueSpreadsheetDocumentAreaCollection, ibValueStructure);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueSpreadsheetDocumentParameterCollection, ibValue);
 
 #pragma endregion
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueSpreadsheetDocument, ibValue);
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueEnumSpreadsheetOrient, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueEnumSpreadsheetHorizontalAlignment, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueEnumSpreadsheetVerticalAlignment, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueEnumSpreadsheetFitMode, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueEnumSpreadsheetBorder, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueEnumSpreadsheetFillType, ibValue);
-
-ibValue::ibValueMethodHelper ibValueSpreadsheetDocument::m_methodHelper;
-ibValue::ibValueMethodHelper ibValueSpreadsheetDocumentRange::m_methodHelper;
 
 enum
 {
@@ -344,34 +319,33 @@ enum
 	eEndColGroup,
 };
 
-void ibValueSpreadsheetDocument::PrepareNames() const
+void ibValueSpreadsheetDocument_BindNames(ibValue::ibMemberTable& helper, const ibValue* /*ctx*/)
 {
-	m_methodHelper.ClearHelper();
-
 	//freeze row/col
-	m_methodHelper.AppendProp(wxT("FixedLeft"), eFixedLeft);
-	m_methodHelper.AppendProp(wxT("FixedTop"), eFixedTop);
-	m_methodHelper.AppendProp(wxT("Areas"), eAreas);
-	m_methodHelper.AppendProp(wxT("Parameters"), eParameters);
-	m_methodHelper.AppendProp(wxT("ReadOnly"), eReadOnly);
-	m_methodHelper.AppendProp(wxT("PrinterName"), ePrinterName);
-	m_methodHelper.AppendProp(wxT("LanguageCode"), eLanguageCode);
+	helper.AppendProp(wxT("FixedLeft"), eFixedLeft);
+	helper.AppendProp(wxT("FixedTop"), eFixedTop);
+	helper.AppendProp(wxT("Areas"), eAreas);
+	helper.AppendProp(wxT("Parameters"), eParameters);
+	helper.AppendProp(wxT("ReadOnly"), eReadOnly);
+	helper.AppendProp(wxT("PrinterName"), ePrinterName);
+	helper.AppendProp(wxT("LanguageCode"), eLanguageCode);
 
-	m_methodHelper.AppendFunc(wxT("Area"), 2, wxT("Area(string: left, string: top = <empty>)"));
-	m_methodHelper.AppendFunc(wxT("Range"), 2, wxT("Range(number: row start, number: row end, number: col start = -1, number: col end = -1)"));
-	m_methodHelper.AppendProc(wxT("PutVerticalPageBreak"), wxT("PutVerticalPageBreak()"));
-	m_methodHelper.AppendProc(wxT("PutHorizontalPageBreak"), wxT("PutHorizontalPageBreak()"));
-	m_methodHelper.AppendFunc(wxT("GetArea"), 1, wxT("GetArea(string: label)"));
-	m_methodHelper.AppendProc(wxT("Clear"), wxT("Clear()"));
-	m_methodHelper.AppendProc(wxT("Print"), wxT("Print(bool: showPrintDlg = true)"));
-	m_methodHelper.AppendProc(wxT("Show"), 1, wxT("Show(string: title)"));
-	m_methodHelper.AppendProc(wxT("Put"), 2, wxT("Put(spreadsheetDocument: table, number: groupLevel = 0)"));
-	m_methodHelper.AppendProc(wxT("Join"), 2, wxT("Join(spreadsheetDocument: table, number: groupLevel = 0)"));
-	m_methodHelper.AppendProc(wxT("BeginRowGroup"), wxT("BeginRowGroup()"));
-	m_methodHelper.AppendProc(wxT("EndRowGroup"), wxT("EndRowGroup()"));
-	m_methodHelper.AppendProc(wxT("BeginColGroup"), wxT("BeginColGroup()"));
-	m_methodHelper.AppendProc(wxT("EndColGroup"), wxT("EndColGroup()"));
+	helper.AppendFunc(wxT("Area"), 2, wxT("Area(string: left, string: top = <empty>)"));
+	helper.AppendFunc(wxT("Range"), 2, wxT("Range(number: row start, number: row end, number: col start = -1, number: col end = -1)"));
+	helper.AppendProc(wxT("PutVerticalPageBreak"), wxT("PutVerticalPageBreak()"));
+	helper.AppendProc(wxT("PutHorizontalPageBreak"), wxT("PutHorizontalPageBreak()"));
+	helper.AppendFunc(wxT("GetArea"), 1, wxT("GetArea(string: label)"));
+	helper.AppendProc(wxT("Clear"), wxT("Clear()"));
+	helper.AppendProc(wxT("Print"), wxT("Print(bool: showPrintDlg = true)"));
+	helper.AppendProc(wxT("Show"), 1, wxT("Show(string: title)"));
+	helper.AppendProc(wxT("Put"), 2, wxT("Put(spreadsheetDocument: table, number: groupLevel = 0)"));
+	helper.AppendProc(wxT("Join"), 2, wxT("Join(spreadsheetDocument: table, number: groupLevel = 0)"));
+	helper.AppendProc(wxT("BeginRowGroup"), wxT("BeginRowGroup()"));
+	helper.AppendProc(wxT("EndRowGroup"), wxT("EndRowGroup()"));
+	helper.AppendProc(wxT("BeginColGroup"), wxT("BeginColGroup()"));
+	helper.AppendProc(wxT("EndColGroup"), wxT("EndColGroup()"));
 }
+
 
 bool ibValueSpreadsheetDocument::SetPropVal(const long lPropNum, const ibValue& varPropVal)
 {
@@ -412,10 +386,10 @@ bool ibValueSpreadsheetDocument::GetPropVal(const long lPropNum, ibValue& pvarPr
 		pvarPropVal = m_spreadsheetDoc->GetRowFreeze();
 		return true;
 	case eAreas:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocumentAreaCollection>(m_spreadsheetDoc);
+		pvarPropVal = new ibValueSpreadsheetDocumentAreaCollection(m_spreadsheetDoc);
 		return true;
 	case eParameters:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocumentParameterCollection>(m_spreadsheetDoc);
+		pvarPropVal = new ibValueSpreadsheetDocumentParameterCollection(m_spreadsheetDoc);
 		return true;
 	case eReadOnly:
 		pvarPropVal = !m_spreadsheetDoc->IsEditable();
@@ -441,7 +415,7 @@ bool ibValueSpreadsheetDocument::CallAsFunc(const long lMethodNum, ibValue& pvar
 			paParams[0]->GetInteger(), lSizeArray > 1 ? paParams[1]->GetInteger() : 0);
 
 		if (cell != nullptr) {
-			pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocumentArea>(
+			pvarRetValue = new ibValueSpreadsheetDocumentArea(
 				m_spreadsheetDoc, paParams[0]->GetInteger(), lSizeArray > 1 ? paParams[1]->GetInteger() : 0);
 			return true;
 		}
@@ -456,7 +430,7 @@ bool ibValueSpreadsheetDocument::CallAsFunc(const long lMethodNum, ibValue& pvar
 		else if (paParams[1]->GetInteger() > m_spreadsheetDoc->GetNumberCols())
 			return false;
 
-		pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocument>(m_spreadsheetDoc->GetArea(
+		pvarRetValue = new ibValueSpreadsheetDocument(m_spreadsheetDoc->GetArea(
 			paParams[0]->GetInteger(), paParams[1]->GetInteger(), lSizeArray > 2 ? paParams[2]->GetInteger() : -1, lSizeArray > 3 ? paParams[3]->GetInteger() : -1));
 
 		return true;
@@ -473,7 +447,7 @@ bool ibValueSpreadsheetDocument::CallAsFunc(const long lMethodNum, ibValue& pvar
 			if (!r)
 				return false;
 
-			pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocument>(m_spreadsheetDoc->GetAreaByName(r->m_label, c ? c->m_label : wxT("")));
+			pvarRetValue = new ibValueSpreadsheetDocument(m_spreadsheetDoc->GetAreaByName(r->m_label, c ? c->m_label : wxT("")));
 			return true;
 		}
 
@@ -483,7 +457,7 @@ bool ibValueSpreadsheetDocument::CallAsFunc(const long lMethodNum, ibValue& pvar
 		if (!r)
 			return false;
 
-		pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocument>(m_spreadsheetDoc->GetAreaByName(
+		pvarRetValue = new ibValueSpreadsheetDocument(m_spreadsheetDoc->GetAreaByName(
 			r->m_label, c ? c->m_label : wxT("")));
 
 		return true;

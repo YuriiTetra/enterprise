@@ -1,29 +1,21 @@
-﻿////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////
 //	Author		: Maxim Kornienko
 //	Description : list data 
 ////////////////////////////////////////////////////////////////////////////
 
 #include "objectList.h"
-#include "registerSqlBuilder.h"
 #include "backend/srcExplorer.h"
 #include "backend/system/systemManager.h"
 
 #include "backend/appData.h"
 
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueListDataObject, ibValueModelTableBase);
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueListDataObjectEnumRef, ibValueListDataObject);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueListDataObjectRef, ibValueListDataObject);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueListRegisterObject, ibValueListDataObject);
 
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueModelTreeDataObject, ibValueModelTreeBase);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueModelTreeDataObjectFolderRef, ibValueModelTreeDataObject);
 
 ibValueListDataObject::ibValueListDataObject(const ibValueMetaObjectGenericData* metaObject, const ibFormID& formType, bool choiceMode) :
 	ibSourceDataObject(),
 	m_recordColumnCollection(new ibValueDataObjectListColumnCollection(this, metaObject)),
-	m_objGuid(choiceMode ? ibGuid::newGuid() : metaObject->GetGuid()), m_methodHelper(new ibValueMethodHelper())
-{
+	m_objGuid(choiceMode ? ibGuid::newGuid() : metaObject->GetGuid()){
 	for (const auto object : metaObject->GetGenericAttributeArrayObject()) {
 		m_filterRow.AppendFilter(
 			object->GetMetaID(),
@@ -39,7 +31,6 @@ ibValueListDataObject::ibValueListDataObject(const ibValueMetaObjectGenericData*
 
 ibValueListDataObject::~ibValueListDataObject()
 {
-	wxDELETE(m_methodHelper);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -47,8 +38,7 @@ ibValueListDataObject::~ibValueListDataObject()
 ibValueModelTreeDataObject::ibValueModelTreeDataObject(const ibValueMetaObjectGenericData* metaObject, const ibFormID& formType, bool choiceMode) :
 	ibSourceDataObject(),
 	m_recordColumnCollection(new ibValueDataObjectTreeColumnCollection(this, metaObject)),
-	m_objGuid(choiceMode ? ibGuid::newGuid() : metaObject->GetGuid()), m_methodHelper(new ibValueMethodHelper())
-{
+	m_objGuid(choiceMode ? ibGuid::newGuid() : metaObject->GetGuid()){
 	for (const auto object : metaObject->GetGenericAttributeArrayObject()) {
 		m_filterRow.AppendFilter(
 			object->GetMetaID(),
@@ -62,22 +52,20 @@ ibValueModelTreeDataObject::ibValueModelTreeDataObject(const ibValueMetaObjectGe
 
 ibValueModelTreeDataObject::~ibValueModelTreeDataObject()
 {
-	wxDELETE(m_methodHelper);
 }
 
 //////////////////////////////////////////////////////////////////////
 //					  ibValueDataObjectListColumnCollection               //
 //////////////////////////////////////////////////////////////////////
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueListDataObject::ibValueDataObjectListColumnCollection, ibValueModelTableBase::ibValueModelColumnCollection);
 
 ibValueListDataObject::ibValueDataObjectListColumnCollection::ibValueDataObjectListColumnCollection() :
-	ibValueModelColumnCollection(), m_methodHelper(nullptr), m_ownerTable(nullptr)
+	ibValueModelColumnCollection(), m_ownerTable(nullptr)
 {
 }
 
 ibValueListDataObject::ibValueDataObjectListColumnCollection::ibValueDataObjectListColumnCollection(ibValueListDataObject* ownerTable, const ibValueMetaObjectGenericData* metaObject) :
-	ibValueModelColumnCollection(), m_methodHelper(new ibValueMethodHelper()), m_ownerTable(ownerTable)
+	ibValueModelColumnCollection(), m_ownerTable(ownerTable)
 {
 	wxASSERT(metaObject);
 
@@ -88,7 +76,6 @@ ibValueListDataObject::ibValueDataObjectListColumnCollection::ibValueDataObjectL
 
 ibValueListDataObject::ibValueDataObjectListColumnCollection::~ibValueDataObjectListColumnCollection()
 {
-	wxDELETE(m_methodHelper);
 }
 
 bool ibValueListDataObject::ibValueDataObjectListColumnCollection::SetAt(const ibValue& varKeyValue, const ibValue& varValue)//пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ 0
@@ -112,15 +99,14 @@ bool ibValueListDataObject::ibValueDataObjectListColumnCollection::GetAt(const i
 	return true;
 }
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection, ibValueModelTreeBase::ibValueModelColumnCollection);
 
 ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection::ibValueDataObjectTreeColumnCollection() :
-	ibValueModelColumnCollection(), m_methodHelper(nullptr), m_ownerTable(nullptr)
+	ibValueModelColumnCollection(), m_ownerTable(nullptr)
 {
 }
 
 ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection::ibValueDataObjectTreeColumnCollection(ibValueModelTreeDataObject* ownerTable, const ibValueMetaObjectGenericData* metaObject) :
-	ibValueModelColumnCollection(), m_methodHelper(new ibValueMethodHelper()), m_ownerTable(ownerTable)
+	ibValueModelColumnCollection(), m_ownerTable(ownerTable)
 {
 	wxASSERT(metaObject);
 
@@ -132,7 +118,6 @@ ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection::ibValueDataOb
 
 ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection::~ibValueDataObjectTreeColumnCollection()
 {
-	wxDELETE(m_methodHelper);
 }
 
 bool ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection::SetAt(const ibValue& varKeyValue, const ibValue& varValue)//пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅ пїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅпїЅ пїЅ 0
@@ -158,7 +143,6 @@ bool ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection::GetAt(co
 //							 ibValueDataObjectListColumnInfo              //
 //////////////////////////////////////////////////////////////////////
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueListDataObject::ibValueDataObjectListColumnCollection::ibValueDataObjectListColumnInfo, ibValueModelTableBase::ibValueModelColumnCollection::ibValueModelColumnInfo);
 
 ibValueListDataObject::ibValueDataObjectListColumnCollection::ibValueDataObjectListColumnInfo::ibValueDataObjectListColumnInfo() :
 	ibValueModelColumnInfo(), m_metaAttribute(nullptr)
@@ -174,7 +158,6 @@ ibValueListDataObject::ibValueDataObjectListColumnCollection::ibValueDataObjectL
 {
 }
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection::ibValueDataObjectTreeColumnInfo, ibValueModelTreeBase::ibValueModelColumnCollection::ibValueModelColumnInfo);
 
 ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection::ibValueDataObjectTreeColumnInfo::ibValueDataObjectTreeColumnInfo() :
 	ibValueModelColumnInfo(), m_metaAttribute(nullptr)
@@ -194,25 +177,22 @@ ibValueModelTreeDataObject::ibValueDataObjectTreeColumnCollection::ibValueDataOb
 //					  ibValueDataObjectListReturnLine                     //
 //////////////////////////////////////////////////////////////////////
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueListDataObject::ibValueDataObjectListReturnLine, ibValueModelTableBase::ibValueModelReturnLine);
 
 ibValueListDataObject::ibValueDataObjectListReturnLine::ibValueDataObjectListReturnLine(ibValueListDataObject* ownerTable, const ibDataViewItem& line) :
-	ibValueModelReturnLine(line), m_methodHelper(new ibValueMethodHelper()), m_ownerTable(ownerTable)
+	ibValueModelReturnLine(line), m_ownerTable(ownerTable)
 {
+	m_members.Bind(this, &ibValueDataObjectListReturnLine::FillMembers);
 }
 
 ibValueListDataObject::ibValueDataObjectListReturnLine::~ibValueDataObjectListReturnLine()
 {
-	wxDELETE(m_methodHelper);
 }
 
-void ibValueListDataObject::ibValueDataObjectListReturnLine::PrepareNames() const
+void ibValueListDataObject::ibValueDataObjectListReturnLine::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-
 	const ibValueMetaObjectGenericData* metaObject = m_ownerTable->GetMetaObject();
 	for (const auto object : metaObject->GetGenericAttributeArrayObject()) {
-		m_methodHelper->AppendProp(
+		helper.AppendProp(
 			object->GetName(),
 			object->GetMetaID()
 		);
@@ -228,33 +208,30 @@ bool ibValueListDataObject::ibValueDataObjectListReturnLine::GetPropVal(const lo
 {
 	if (appData->DesignerMode())
 		return false;
-	const ibMetaID& id = m_methodHelper->GetPropData(lPropNum);
+	const ibMetaID& id = m_members.GetPropData(lPropNum);
 	ibValueTableRow* node = m_ownerTable->GetViewData<ibValueTableRow>(m_lineItem);
 	if (node == nullptr)
 		return false;
 	return node->GetValue(id, pvarPropVal);
 }
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueModelTreeDataObject::ibValueDataObjectTreeReturnLine, ibValueModelTreeBase::ibValueModelReturnLine);
 
 ibValueModelTreeDataObject::ibValueDataObjectTreeReturnLine::ibValueDataObjectTreeReturnLine(ibValueModelTreeDataObject* ownerTable, const ibDataViewItem& line) :
 	ibValueModelReturnLine(line),
-	m_methodHelper(new ibValueMethodHelper()), m_ownerTable(ownerTable)
+	m_ownerTable(ownerTable)
 {
+	m_members.Bind(this, &ibValueDataObjectTreeReturnLine::FillMembers);
 }
 
 ibValueModelTreeDataObject::ibValueDataObjectTreeReturnLine::~ibValueDataObjectTreeReturnLine()
 {
-	wxDELETE(m_methodHelper);
 }
 
-void ibValueModelTreeDataObject::ibValueDataObjectTreeReturnLine::PrepareNames() const
+void ibValueModelTreeDataObject::ibValueDataObjectTreeReturnLine::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-
 	const ibValueMetaObjectGenericData* metaObject = m_ownerTable->GetMetaObject();
 	for (const auto object : metaObject->GetGenericAttributeArrayObject()) {
-		m_methodHelper->AppendProp(
+		helper.AppendProp(
 			object->GetName(),
 			object->GetMetaID()
 		);
@@ -270,7 +247,7 @@ bool ibValueModelTreeDataObject::ibValueDataObjectTreeReturnLine::GetPropVal(con
 {
 	if (appData->DesignerMode())
 		return false;
-	const ibMetaID& id = m_methodHelper->GetPropData(lPropNum);
+	const ibMetaID& id = m_members.GetPropData(lPropNum);
 	ibValueTreeNode* node = m_ownerTable->GetViewData<ibValueTreeNode>(m_lineItem);
 	if (node != nullptr) {
 		return node->GetValue(id, pvarPropVal);
@@ -301,6 +278,7 @@ ibDataViewItem ibValueListDataObjectEnumRef::FindRowValue(const ibValue& varValu
 ibValueListDataObjectEnumRef::ibValueListDataObjectEnumRef(const ibValueMetaObjectRecordDataEnumRef* metaObject, const ibFormID& formType, bool choiceMode) :
 	ibValueListDataObject(metaObject, formType, choiceMode), m_metaObject(metaObject), m_choiceMode(choiceMode)
 {
+	m_members.Bind(this, &ibValueListDataObjectEnumRef::FillMembers);
 	ibValueListDataObject::AppendSort(m_metaObject->GetDataOrder(), true, true, true);
 	ibValueListDataObject::AppendSort(m_metaObject->GetDataReference(), true, true, true);
 }
@@ -405,6 +383,7 @@ ibDataViewItem ibValueListDataObjectRef::FindRowValue(const ibValue& varValue, c
 ibValueListDataObjectRef::ibValueListDataObjectRef(const ibValueMetaObjectRecordDataMutableRef* metaObject, const ibFormID& formType, bool choiceMode) :
 	ibValueListDataObject(metaObject, formType, choiceMode), m_metaObject(metaObject), m_choiceMode(choiceMode)
 {
+	m_members.Bind(this, &ibValueListDataObjectRef::FillMembers);
 }
 
 ibSourceExplorer ibValueListDataObjectRef::GetSourceExplorer() const
@@ -418,6 +397,8 @@ ibSourceExplorer ibValueListDataObjectRef::GetSourceExplorer() const
 		if (m_metaObject->IsDataReference(object->GetMetaID()))
 			srcHelper.AppendSource(object, true, false);
 		else if (m_metaObject->IsDataDeletionMark(object->GetMetaID()))
+			srcHelper.AppendSource(object, true, false);
+		else if (m_metaObject->IsDataVersion(object->GetMetaID()))
 			srcHelper.AppendSource(object, true, false);
 		else
 			srcHelper.AppendSource(object, true, true);
@@ -624,6 +605,7 @@ ibValueModelTreeDataObjectFolderRef::ibValueModelTreeDataObjectFolderRef(const i
 	int listMode, bool choiceMode) : ibValueModelTreeDataObject(metaObject, formType, choiceMode),
 	m_metaObject(metaObject), m_listMode(listMode), m_choiceMode(choiceMode)
 {
+	m_members.Bind(this, &ibValueModelTreeDataObjectFolderRef::FillMembers);
 	ibValueModelTreeDataObject::AppendSort(m_metaObject->GetDataCode(), true, false);
 	ibValueModelTreeDataObject::AppendSort(m_metaObject->GetDataDescription(), true);
 	// Reference (uuid PK) sort = system: always enabled, OnSortColumnChanged
@@ -648,6 +630,8 @@ ibSourceExplorer ibValueModelTreeDataObjectFolderRef::GetSourceExplorer() const
 		else if (m_metaObject->IsDataDeletionMark(object->GetMetaID()))
 			srcHelper.AppendSource(object, true, false);
 		else if (m_metaObject->IsDataPredefinedName(object->GetMetaID()))
+			srcHelper.AppendSource(object, true, false);
+		else if (m_metaObject->IsDataVersion(object->GetMetaID()))
 			srcHelper.AppendSource(object, true, false);
 		else if (m_metaObject->IsDataParent(object->GetMetaID()))
 			srcHelper.AppendSource(object, true, false);
@@ -910,15 +894,19 @@ ibDataViewItem ibValueListRegisterObject::FindRowValue(const ibValue& varValue, 
 				pRefData->GetValueByMetaID(attrLine->GetMetaID()));
 	}
 	else {
-		for (auto& dim : m_metaObject->GetGenericDimentionArrayObject())
+		for (auto& dim : m_metaObject->GetGenericDimensionArrayObject())
 			stub->AppendNodeValue(dim->GetMetaID(),
 				pRefData->GetValueByMetaID(dim->GetMetaID()));
 	}
-	// Effective sort columns → m_nodeValues (read by BuildRegisterAnchor).
-	for (const auto& c : ibRegisterSqlBuilder::EffectiveOrder(m_metaObject, m_sortOrder)) {
+	// Effective sort columns → m_nodeValues (read by BuildRegisterAnchor). The sort item
+	// carries a COLUMN, and a column self-describes its read key (GetModelID == the metaID
+	// for an attribute column) — no ResolveAttribute, no downcast.
+	for (const auto& c : EffectiveSortOrder()) {
+		if (c.m_col == nullptr) continue;
+		const ibMetaID metaID = c.m_col->GetModelID();
 		ibValue v;
-		if (pRefData->GetValueByMetaID(c.m_attr->GetMetaID(), v))
-			stub->AppendTableValue(c.m_attr->GetMetaID(), v);
+		if (pRefData->GetValueByMetaID(metaID, v))
+			stub->AppendTableValue(metaID, v);
 	}
 
 	ibDataViewItem item(stub);   // IncRef → 2
@@ -929,6 +917,7 @@ ibDataViewItem ibValueListRegisterObject::FindRowValue(const ibValue& varValue, 
 ibValueListRegisterObject::ibValueListRegisterObject(const ibValueMetaObjectRegisterData* metaObject, const ibFormID& formType) :
 	ibValueListDataObject(metaObject, formType), m_metaObject(metaObject)
 {
+	m_members.Bind(this, &ibValueListRegisterObject::FillMembers);
 	if (m_metaObject->HasRecorder()) {
 		if (m_metaObject->HasPeriod()) ibValueListDataObject::AppendSort(metaObject->GetRegisterPeriod());
 		ibValueListDataObject::AppendSort(metaObject->GetRegisterRecorder());
@@ -938,7 +927,7 @@ ibValueListRegisterObject::ibValueListRegisterObject(const ibValueMetaObjectRegi
 		ibValueListDataObject::AppendSort(metaObject->GetRegisterPeriod());
 	}
 
-	for (auto& dimension : m_metaObject->GetGenericDimentionArrayObject()) {
+	for (auto& dimension : m_metaObject->GetGenericDimensionArrayObject()) {
 		ibValueListDataObject::AppendSort(dimension, true, true, true);
 	}
 }
@@ -1088,11 +1077,10 @@ wxString ibValueListRegisterObject::GetString() const
 //*                              Support methods                             *
 //****************************************************************************
 
-void ibValueListDataObjectEnumRef::PrepareNames() const
+void ibValueListDataObjectEnumRef::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-	m_methodHelper->AppendProp(wxT("ChoiceMode"));
-	m_methodHelper->AppendProc(wxT("Refresh"), wxT("Refresh()"));
+	helper.AppendProp(wxT("ChoiceMode"));
+	helper.AppendProc(wxT("Refresh"), wxT("Refresh()"));
 }
 
 bool ibValueListDataObjectEnumRef::CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray)
@@ -1108,11 +1096,10 @@ bool ibValueListDataObjectEnumRef::CallAsProc(const long lMethodNum, ibValue** p
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void ibValueListDataObjectRef::PrepareNames() const
+void ibValueListDataObjectRef::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-	m_methodHelper->AppendProp(wxT("ChoiceMode"));
-	m_methodHelper->AppendProc(wxT("Refresh"), wxT("Refresh()"));
+	helper.AppendProp(wxT("ChoiceMode"));
+	helper.AppendProc(wxT("Refresh"), wxT("Refresh()"));
 }
 
 bool ibValueListDataObjectRef::CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray)
@@ -1128,11 +1115,10 @@ bool ibValueListDataObjectRef::CallAsProc(const long lMethodNum, ibValue** paPar
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void ibValueModelTreeDataObjectFolderRef::PrepareNames() const
+void ibValueModelTreeDataObjectFolderRef::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-	m_methodHelper->AppendProp(wxT("ChoiceMode"));
-	m_methodHelper->AppendProc(wxT("Refresh"), wxT("Refresh()"));
+	helper.AppendProp(wxT("ChoiceMode"));
+	helper.AppendProc(wxT("Refresh"), wxT("Refresh()"));
 }
 
 bool ibValueModelTreeDataObjectFolderRef::CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray)
@@ -1148,10 +1134,9 @@ bool ibValueModelTreeDataObjectFolderRef::CallAsProc(const long lMethodNum, ibVa
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void ibValueListRegisterObject::PrepareNames() const
+void ibValueListRegisterObject::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-	m_methodHelper->AppendProc(wxT("Refresh"), wxT("Refresh()"));
+	helper.AppendProc(wxT("Refresh"), wxT("Refresh()"));
 }
 
 bool ibValueListRegisterObject::CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray)

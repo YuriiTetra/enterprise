@@ -10,10 +10,7 @@
 #include "backend/databaseLayer/databaseLayer.h"
 #include "backend/databaseLayer/databaseErrorCodes.h"
 
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueMetaObject, ibValue);
 
-#define metaBlock 0x200222
-#define helpBlock 0x200224
 
 //*****************************************************************************************
 //*                                  MetaObject                                           *
@@ -72,9 +69,10 @@ bool ibValueMetaObject::BuildNewName()
 
 /////////////////////////////////////////////////////////////////////////////////////////
 
-ibValueMetaObject::ibValueMetaObject(const wxString& strName, const wxString& synonym, const wxString& comment) : ibValue(ibValueTypes::TYPE_VALUE, true),
-m_methodHelper(new ibValueMethodHelper()), m_metaData(nullptr), m_metaFlags(metaDefaultFlag), m_metaId(0)
+ibValueMetaObject::ibValueMetaObject(const wxString& strName, const wxString& synonym, const wxString& comment) : ibValueDynamicMembers(ibValueTypes::TYPE_VALUE, true),
+m_metaData(nullptr), m_metaFlags(metaDefaultFlag), m_metaId(0)
 {
+	m_members.Bind(this, &ibValueMetaObject::FillMembers);
 	m_propertyName->SetValue(strName);
 	m_propertySynonym->SetValue(synonym);
 	m_propertyComment->SetValue(comment);
@@ -82,139 +80,9 @@ m_methodHelper(new ibValueMethodHelper()), m_metaData(nullptr), m_metaFlags(meta
 
 ibValueMetaObject::~ibValueMetaObject()
 {
-	wxDELETE(m_methodHelper);
-}
-
-bool ibValueMetaObject::LoadMeta(ibReaderMemory& dataReader)
-{
-	//Save meta version 
-	(void)dataReader.r_u32(); //reserved 
-
-	//Load unique guid 
-	wxString strGuid;
-	dataReader.r_stringZ(strGuid);
-	m_metaGuid = strGuid;
-
-	//Load meta id
-	m_metaId = dataReader.r_u32();
-
-	//Load standart fields
-	m_propertyName->LoadData(dataReader);
-	m_propertySynonym->LoadData(dataReader);
-	m_propertyComment->LoadData(dataReader);
-
-	//special info deleted 
-	if (dataReader.r_u8()) {
-		MarkAsDeleted();
-	}
-
-	//load interface 
-	if (!LoadInterface(dataReader))
-		return false;
-
-	//load roles 
-	if (!LoadRole(dataReader))
-		return false;
-
-	//load meta 
-	wxMemoryBuffer meta_buffer;
-	if (!dataReader.r_chunk(metaBlock, meta_buffer))
-		return false;
-
-	ibReaderMemory metaObjectReader(meta_buffer);
-	metaObjectReader.r_u32(); //reserved flags
-	if (!LoadData(metaObjectReader))
-		return false;
-
-	//load help 
-	wxMemoryBuffer help_buffer;
-	if (!dataReader.r_chunk(helpBlock, help_buffer))
-		return false;
-	
-	ibReaderMemory helpReader(help_buffer);
-	m_strHelpContent = helpReader.r_stringZ();
-	return true;
-}
-
-bool ibValueMetaObject::SaveMeta(ibWriterMemory& dataWritter)
-{
-	//save meta version 
-	dataWritter.w_u32(version_oes_last); //reserved 
-
-	//save unique guid
-	dataWritter.w_stringZ(m_metaGuid);
-
-	//save meta id 
-	dataWritter.w_u32(m_metaId);
-
-	//save standart fields
-	m_propertyName->SaveData(dataWritter);
-	m_propertySynonym->SaveData(dataWritter);
-	m_propertyComment->SaveData(dataWritter);
-
-	//special info deleted
-	dataWritter.w_u8(IsDeleted());
-
-	//save interface 
-	if (!SaveInterface(dataWritter))
-		return false;
-
-	//save roles 
-	if (!SaveRole(dataWritter))
-		return false;
-
-	//save meta 
-	ibWriterMemory metaObjectWritter;
-	metaObjectWritter.w_u32(0); //reserved flags
-	if (!SaveData(metaObjectWritter))
-		return false;
-
-	dataWritter.w_chunk(metaBlock, metaObjectWritter.buffer());
-
-	//save help 
-	ibWriterMemory helpWritter;
-	helpWritter.w_stringZ(m_strHelpContent);
-	dataWritter.w_chunk(helpBlock, helpWritter.buffer());
-	return true;
-}
-
-bool ibValueMetaObject::LoadMetaObject(ibMetaData* metaData, ibReaderMemory& dataReader)
-{
-	m_metaData = metaData;
-
-	if (!LoadMeta(dataReader))
-		return false;
-
-	if (!OnLoadMetaObject(metaData))
-		return false;
-
-	return true;
-}
-
-bool ibValueMetaObject::SaveMetaObject(ibMetaData* metaData, ibWriterMemory& dataWritter, int flags)
-{
-	bool saveToFile = (flags & saveToFileFlag) != 0;
-
-	if (m_metaData != metaData)
-		return false;
-
-	if (!SaveMeta(dataWritter))
-		return false;
-
-	if (!saveToFile &&
-		!OnSaveMetaObject(flags)) {
-		return false;
-	}
-
-	return true;
-}
-
-bool ibValueMetaObject::DeleteMetaObject(ibMetaData* metaData)
-{
-	if (m_metaData != metaData)
-		return false;
-
-	return DeleteData();
+	// Children are released by the ibPropertyObjectHelper base destructor (owning
+	// handles cascade down the subtree). The delete event (OnDeleteMetaObject) is
+	// a separate, preceding step.
 }
 
 bool ibValueMetaObject::CreateMetaTable(ibMetaDataConfiguration* srcMetaData, int flags)
@@ -311,13 +179,16 @@ bool ibValueMetaObject::Init(ibValue** paParams, const long lSizeArray)
 
 	ibValueMetaObject* parent = nullptr;
 	if (paParams[0]->ConvertToValue(parent)) {
-		const ibClassID& clsid = GetClassType();
-		if (parent != nullptr) {
-			SetParent(parent);
-			parent->AddChild(this);
-		}
-		return parent != nullptr ?
-			parent->FilterChild(clsid) : true;
+		if (parent == nullptr)
+			return true;
+		// Check acceptance BEFORE attaching: with owning children a rejected node
+		// would already sit in the parent's vector when CreateObjectRef wxDELETEs
+		// it on Init failure → double free. Reject first, attach only if accepted.
+		if (!parent->FilterChild(GetClassType()))
+			return false;
+		SetParent(parent);
+		parent->AddChild(this);
+		return true;
 	}
 
 	return false;
@@ -427,7 +298,7 @@ bool ibValueMetaObject::CopyObject(ibWriterMemory& writer) const
 
 			ibWriterMemory writerChildMemory;
 
-			for (const auto object : copyObject->m_children) {
+			for (ibValueMetaObject* object : copyObject->m_children) {
 
 				if (!copyObject->FilterChild(object->GetClassType()))
 					continue;
@@ -622,14 +493,12 @@ wxString ibValueMetaObject::GetFileName() const
 //*                              Support methods                             *
 //****************************************************************************
 
-void ibValueMetaObject::PrepareNames() const
+void ibValueMetaObject::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-
 	for (unsigned idx = 0; idx < ibPropertyObject::GetPropertyCount(); idx++) {
 		ibProperty* property = ibPropertyObject::GetProperty(idx);
 		if (property == nullptr) continue;
-		m_methodHelper->AppendProp(property->GetName(), true, false, idx);
+		helper.AppendProp(property->GetName(), true, false, idx);
 	}
 }
 
@@ -672,7 +541,7 @@ void ibRestructureInfo::RequireExclusiveForDDL()
 	// session is attached). Nobody else can be connected at this stage, so
 	// skip the gate entirely.
 	auto* session  = ibSession::Current();
-	auto* registry = appData != nullptr ? appData->GetSessionRegistry() : nullptr;
+	auto* registry = ibApplicationData::GetSessionRegistry();
 	if (session == nullptr || registry == nullptr) return;
 
 	// Normal apply — try to acquire exclusive. Succeeds only if we are the
@@ -686,7 +555,7 @@ void ibRestructureInfo::RequireExclusiveForDDL()
 
 	ibBackendCoreException::Error(
 		_("Structure (DDL) changes require exclusive mode. Other sessions "
-		  "are connected — disconnect them and try again. "
+		  "are connected - disconnect them and try again. "
 		  "Code-only changes (modules, forms) can be saved without it."));
 }
 
@@ -695,7 +564,7 @@ void ibRestructureInfo::ReleaseAutoExclusive()
 	if (!ts_acquiredByGate) return;
 	ts_acquiredByGate = false;
 	auto* session  = ibSession::Current();
-	auto* registry = appData != nullptr ? appData->GetSessionRegistry() : nullptr;
+	auto* registry = ibApplicationData::GetSessionRegistry();
 	if (session != nullptr && registry != nullptr) {
 		registry->SetExclusive(session, false);
 	}

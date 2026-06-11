@@ -35,6 +35,9 @@ enum {
 
 	wxID_DESIGNER_CONFIGURATION_LOAD_FROM_FILE,
 	wxID_DESIGNER_CONFIGURATION_SAVE_TO_FILE,
+	wxID_DESIGNER_CONFIGURATION_COMPARE_FILE,
+	wxID_DESIGNER_CONFIGURATION_COMPARE_DB,
+	wxID_DESIGNER_CONFIGURATION_COMPARE_TWO_FILES,
 
 	wxID_DESIGNER_DATABASE_LOAD_FROM_FILE,
 	wxID_DESIGNER_DATABASE_SAVE_TO_FILE,
@@ -44,28 +47,33 @@ enum {
 	wxID_DESIGNER_ABOUT,
 	wxID_DESIGNER_END
 };
+// Note: Syntax-helper command ids live in frontend/mainFrame/mainFrame.h
+// (wxID_FRONTEND_SYNTAX_HELPER / wxID_FRONTEND_SYNTAX_HELPER_LOOKUP) so
+// frontend widgets (e.g. ibCodeEditor's context menu) can post them
+// without taking a dependency on the downstream designer header.
 
-//menu  
+//menu
 enum {
 	wxID_APPLICATION_DEBUG = wxID_HIGHEST + 1,
 	wxID_APPLICATION_SETTING,
 	wxID_APPLICATION_USERS,
 	wxID_APPLICATION_ACTIVE_USERS,
+	wxID_APPLICATION_AUDIT_LOG,
 	wxID_APPLICATION_CONNECTION,
 };
 
-#define mainFrame	(ibFrontendDocMDIFrameDesigner::GetFrame())
+#define mainFrame	(ibFrontendMainFrameDesigner::GetFrame())
 
-class ibFrontendDocMDIFrameDesigner : public ibFrontendDocMDIFrame {
+class ibFrontendMainFrameDesigner : public ibFrontendMainFrame {
 public:
 
-	static ibFrontendDocMDIFrameDesigner* GetFrame();
+	static ibFrontendMainFrameDesigner* GetFrame();
 
-	ibFrontendDocMDIFrameDesigner(const wxString& title = _("Designer"),
+	ibFrontendMainFrameDesigner(const wxString& title = _("Designer"),
 		const wxPoint& pos = wxDefaultPosition,
 		const wxSize& size = wxDefaultSize);
 
-	virtual ~ibFrontendDocMDIFrameDesigner();
+	virtual ~ibFrontendMainFrameDesigner();
 
 	void Message(const wxString& strMessage, ibStatusMessage status) { m_outputWindow->SharedOutput(strMessage, status); }
 	void ClearMessage() { m_outputWindow->ClearAll(); }
@@ -82,6 +90,15 @@ public:
 	ibStackWindow* GetStackWindow() const { return m_stackWindow; }
 	ibWatchWindow* GetWatchWindow() const { return m_watchWindow; }
 	ibLocalWindow* GetLocalWindow() const { return m_localWindow; }
+
+	// Syntax-helper sidebar lifecycle. Pane is lazy-created on first
+	// toggle / lookup so the corpus load is amortised away from
+	// designer startup. OpenHelpForCursor: resolve the identifier
+	// at the focused editor's caret and either drive the pane to the
+	// single match or open the chooser on multiple matches.
+	void EnsureHelpPane();
+	void ToggleHelpPane();
+	void OpenHelpForCursor();
 
 	void LoadOptions();
 	void SaveOptions();
@@ -137,6 +154,7 @@ protected:
 	void OnToolsSettings(wxCommandEvent& event);
 	void OnUsers(wxCommandEvent& event);
 	void OnActiveUsers(wxCommandEvent& event);
+	void OnAuditLog(wxCommandEvent& event);
 	void OnConnection(wxCommandEvent& event);
 
 	void OnAbout(wxCommandEvent& event);
@@ -150,6 +168,13 @@ private:
 	wxMenu* m_menuSetting;
 	wxMenu* m_menuAdministration;
 	wxMenu* m_menuHelp;
+
+	// Syntax-helper sidebar. Created on first toggle; owned by the
+	// AUI manager once added. XML state persistence (last entry id /
+	// active tab / detail font boost) lands as a separate cosmetic
+	// step — pane works fully without it, just doesn't remember
+	// position across sessions.
+	class ibHelpPaneView* m_helpPane = nullptr;
 
 	ibMetadataTree* m_metaWindow;
 

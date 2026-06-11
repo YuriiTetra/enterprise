@@ -9,7 +9,7 @@
 //*                                Hotkey support                                *
 //********************************************************************************
 
-void ibFrontendDocMDIFrameDesigner::SetDefaultHotKeys()
+void ibFrontendMainFrameDesigner::SetDefaultHotKeys()
 {
 	// Setup the hotkeys.
 	m_keyBinder.SetShortcut(wxID_NEW, wxT("Ctrl+N"));
@@ -31,13 +31,20 @@ void ibFrontendDocMDIFrameDesigner::SetDefaultHotKeys()
 	m_keyBinder.SetShortcut(wxID_DESIGNER_DEBUG_NEXT_POINT, wxT("F9"));
 
 	m_keyBinder.SetShortcut(wxID_DESIGNER_ABOUT, wxT("F1"));
+
+	// Syntax helper. RawCtrl forces literal Control on macOS where
+	// wxWidgets otherwise rewrites "Ctrl" to Cmd; on Windows / Linux
+	// RawCtrl is identical to Ctrl. Without these SetShortcut calls
+	// ibKeyBinder strips the accelerator labels during LoadOptions.
+	m_keyBinder.SetShortcut(wxID_FRONTEND_SYNTAX_HELPER,        wxT("RawCtrl+Alt+F1"));
+	m_keyBinder.SetShortcut(wxID_FRONTEND_SYNTAX_HELPER_LOOKUP, wxT("RawCtrl+F1"));
 }
 
 //********************************************************************************
 //*                                Default menu                                  *
 //********************************************************************************
 
-enum MDI_MENU_ID
+enum WINDOW_MENU_ID
 {
 	wxWINDOWCLOSE = 4001,
 	wxWINDOWCLOSEALL,
@@ -50,7 +57,7 @@ enum MDI_MENU_ID
 
 #include "frontend/artProvider/artProvider.h"
 
-void ibFrontendDocMDIFrameDesigner::InitializeDefaultMenu()
+void ibFrontendMainFrameDesigner::InitializeDefaultMenu()
 {
 	m_frameMenuBar = new wxMenuBar;
 
@@ -145,6 +152,24 @@ void ibFrontendDocMDIFrameDesigner::InitializeDefaultMenu()
 	menuItem = m_menuConfiguration->Append(wxID_DESIGNER_CONFIGURATION_SAVE_TO_FILE, _("Save configuration"));
 	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
 
+	m_menuConfiguration->AppendSeparator();
+
+	// "Compare configurations" submenu — three entry points (file / DB
+	// baseline / two arbitrary files) grouped together so the parent
+	// Configuration menu stays compact.
+	wxMenu* menuCompare = new wxMenu;
+
+	menuItem = menuCompare->Append(wxID_DESIGNER_CONFIGURATION_COMPARE_FILE, _("With file..."));
+	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
+
+	menuItem = menuCompare->Append(wxID_DESIGNER_CONFIGURATION_COMPARE_DB, _("With database configuration"));
+	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
+
+	menuItem = menuCompare->Append(wxID_DESIGNER_CONFIGURATION_COMPARE_TWO_FILES, _("Two files..."));
+	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
+
+	m_menuConfiguration->AppendSubMenu(menuCompare, _("Compare configurations"));
+
 	m_frameMenuBar->Append(m_menuConfiguration, _("Configuration"));
 	m_frameMenuBar->Append(m_menuDebug, _("Debug"));
 
@@ -153,6 +178,9 @@ void ibFrontendDocMDIFrameDesigner::InitializeDefaultMenu()
 	menuItem = m_menuAdministration->Append(wxID_APPLICATION_USERS, _("Users"));
 	menuItem->Enable(activeMetaData->AccessRight_DataAdministration());
 	menuItem = m_menuAdministration->Append(wxID_APPLICATION_ACTIVE_USERS, _("Active users"));
+	menuItem->Enable(activeMetaData->AccessRight_ActiveUsers());
+	m_menuAdministration->AppendSeparator();
+	menuItem = m_menuAdministration->Append(wxID_APPLICATION_AUDIT_LOG, _("Registration journal"));
 	menuItem->Enable(activeMetaData->AccessRight_ActiveUsers());
 	m_menuAdministration->AppendSeparator();
 	menuItem = m_menuAdministration->Append(wxID_DESIGNER_DATABASE_LOAD_FROM_FILE, _("Restore database"));
@@ -170,32 +198,54 @@ void ibFrontendDocMDIFrameDesigner::InitializeDefaultMenu()
 	m_menuSetting->Append(wxID_APPLICATION_SETTING, _("Options..."));
 
 	m_menuHelp = new wxMenu;
+	// Syntax helper pane toggle. Cursor look-up has no menu entry —
+	// the editor's right-click context menu and the RawCtrl+F1
+	// accelerator (m_keyBinder) cover that path; a second top-level
+	// menu surface for the same action just confuses the menubar.
+	// RawCtrl forces the literal Control key on every platform
+	// (wxWidgets maps "Ctrl" to Cmd on macOS). NB: on macOS the Help
+	// menu can be intercepted by the system-native Help search; if
+	// that surfaces as a real problem this can move to Tools (Windows
+	// is the primary platform now).
+	m_menuHelp->Append(wxID_FRONTEND_SYNTAX_HELPER,
+	                   _("Syntax Helper\tRawCtrl+Alt+F1"));
+	m_menuHelp->AppendSeparator();
 	m_menuHelp->Append(wxID_DESIGNER_ABOUT, _("About"));
 	m_frameMenuBar->Append(m_menuHelp, wxGetStockLabel(wxID_HELP, wxSTOCK_NOFLAGS));
 
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnOpenConfiguration, this, wxID_DESIGNER_CONFIGURATION_OPEN_DATABASE);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnRollbackConfiguration, this, wxID_DESIGNER_CONFIGURATION_ROLLBACK_DATABASE);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnUpdateConfiguration, this, wxID_DESIGNER_CONFIGURATION_UPDATE_DATABASE);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnOpenConfiguration, this, wxID_DESIGNER_CONFIGURATION_OPEN_DATABASE);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnRollbackConfiguration, this, wxID_DESIGNER_CONFIGURATION_ROLLBACK_DATABASE);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnUpdateConfiguration, this, wxID_DESIGNER_CONFIGURATION_UPDATE_DATABASE);
 
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnConfiguration, this, wxID_DESIGNER_CONFIGURATION_LOAD_FROM_FILE, wxID_DESIGNER_CONFIGURATION_SAVE_TO_FILE);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnConfiguration, this, wxID_DESIGNER_CONFIGURATION_LOAD_FROM_FILE, wxID_DESIGNER_CONFIGURATION_COMPARE_TWO_FILES);
 
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnStartDebug, this, wxID_DESIGNER_DEBUG_START);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnStartDebugWithoutDebug, this, wxID_DESIGNER_DEBUG_START_WITHOUT_DEBUGGING);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnStartDebugWeb, this, wxID_DESIGNER_DEBUG_START_WEB);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnStartDebugWithoutDebugWeb, this, wxID_DESIGNER_DEBUG_START_WITHOUT_DEBUGGING_WEB);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnAttachForDebugging, this, wxID_DESIGNER_DEBUG_ATTACH_FOR_DEBUGGING);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnStartDebug, this, wxID_DESIGNER_DEBUG_START);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnStartDebugWithoutDebug, this, wxID_DESIGNER_DEBUG_START_WITHOUT_DEBUGGING);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnStartDebugWeb, this, wxID_DESIGNER_DEBUG_START_WEB);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnStartDebugWithoutDebugWeb, this, wxID_DESIGNER_DEBUG_START_WITHOUT_DEBUGGING_WEB);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnAttachForDebugging, this, wxID_DESIGNER_DEBUG_ATTACH_FOR_DEBUGGING);
 
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnRunDebugCommand, this, wxID_DESIGNER_DEBUG_EDIT_POINT, wxID_DESIGNER_DEBUG_REMOVE_ALL_DEBUGPOINTS);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnToolsSettings, this, wxID_APPLICATION_SETTING);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnUsers, this, wxID_APPLICATION_USERS);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnActiveUsers, this, wxID_APPLICATION_ACTIVE_USERS);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnConnection, this, wxID_APPLICATION_CONNECTION);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnRunDebugCommand, this, wxID_DESIGNER_DEBUG_EDIT_POINT, wxID_DESIGNER_DEBUG_REMOVE_ALL_DEBUGPOINTS);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnToolsSettings, this, wxID_APPLICATION_SETTING);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnUsers, this, wxID_APPLICATION_USERS);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnActiveUsers, this, wxID_APPLICATION_ACTIVE_USERS);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnAuditLog, this, wxID_APPLICATION_AUDIT_LOG);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnConnection, this, wxID_APPLICATION_CONNECTION);
 
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnLoadDatabase, this, wxID_DESIGNER_DATABASE_LOAD_FROM_FILE);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnSaveDatabase, this, wxID_DESIGNER_DATABASE_SAVE_TO_FILE);
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnClearDatabase, this, wxID_DESIGNER_DATABASE_CLEAR);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnLoadDatabase, this, wxID_DESIGNER_DATABASE_LOAD_FROM_FILE);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnSaveDatabase, this, wxID_DESIGNER_DATABASE_SAVE_TO_FILE);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnClearDatabase, this, wxID_DESIGNER_DATABASE_CLEAR);
 
-	Bind(wxEVT_MENU, &ibFrontendDocMDIFrameDesigner::OnAbout, this, wxID_DESIGNER_ABOUT);
+	Bind(wxEVT_MENU, &ibFrontendMainFrameDesigner::OnAbout, this, wxID_DESIGNER_ABOUT);
+
+	// Syntax helper — lambda bindings, no member fn to lose to the
+	// designer header.
+	Bind(wxEVT_MENU,
+	     [this](wxCommandEvent&) { ToggleHelpPane(); },
+	     wxID_FRONTEND_SYNTAX_HELPER);
+	Bind(wxEVT_MENU,
+	     [this](wxCommandEvent&) { OpenHelpForCursor(); },
+	     wxID_FRONTEND_SYNTAX_HELPER_LOOKUP);
 
 	LoadOptions();
 }

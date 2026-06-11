@@ -71,6 +71,14 @@ public:
 	virtual bool TryProbeRowLock(const wxString& tableName,
 		const wxString& pkColumn, const wxString& pkValue) override;
 
+	// Write-time row-lock dialect (see docs/record-locks.md). PG locks
+	// rows via "SELECT ... FOR UPDATE"; appending "NOWAIT" raises
+	// SQLSTATE 55P03 (lock_not_available) instead of blocking. The
+	// Write path leaves NOWAIT off and waits at the driver's default
+	// lock_timeout; probe-style callers append it.
+	wxString RowLockHint() const override { return wxT("FOR UPDATE"); }
+	wxString NoWaitClause() const override { return wxT("NOWAIT"); }
+
 	// Database schema API contributed by M. Szeftel (author of wxActiveRecordGenerator)
 	virtual bool DatabaseExists(const wxString& table);
 	virtual bool TableExists(const wxString& table);
@@ -84,8 +92,34 @@ public:
 		return DATABASELAYER_POSTGRESQL;
 	}
 
+	// PG SQL dialect. Static holds the definition (a test reads it without
+	// constructing the driver — no libpq). The virtual GetDialect() is the
+	// polymorphic access point L2 uses (conn->GetDialect()).
+	static const ibDialectDictionary& Dialect();
+	virtual const ibDialectDictionary& GetDialect() const override;
+
+	// PG DB temp-table facts (the first real temp target — ad-hoc CREATE TEMPORARY TABLE). Presence
+	// of this (vs the base nullptr) flips PG onto the temp path; FB stays on RAM. (docs/temp-db.md)
+	static const ibTempTableDialect& TempDialect();
+	virtual const ibTempTableDialect* GetTempTableDialect() const override;
+
 	static int TranslateErrorCode(int nCode);
 	static bool IsAvailable();
+
+	// Map the most recent error's SQLSTATE (set in m_lastSqlState by
+	// the result-set / driver helpers when libpq surfaces a structured
+	// error) to a portable Kind. SQLSTATE is the canonical PostgreSQL
+	// error identifier — class digits (first two) drive most of the
+	// classification (23 = integrity violation → Constraint, 40 =
+	// transaction rollback → Deadlock, 42 = syntax/access → Syntax, 08
+	// = connection exception → ConnectionLost).
+	ibBackendDatabaseException::Kind ClassifyDatabaseError(int nativeCode) const override;
+	wxString GetSqlState() const override { return m_lastSqlState; }
+
+	// Internal hook for libpq error paths — called from places that
+	// already have a PGresult* in hand to stash the SQLSTATE so the
+	// next ThrowDatabaseException carries it.
+	void SetLastSqlState(const wxString& s) { m_lastSqlState = s; }
 
 protected:
 
@@ -114,6 +148,11 @@ private:
 	wxString m_strPort;
 
 	void* m_pDatabase;
+
+	// Stashed by SetLastSqlState() — the most recent SQLSTATE libpq
+	// surfaced via PQresultErrorField(PG_DIAG_SQLSTATE). Travels with
+	// the next ThrowDatabaseException so admin logs see it.
+	wxString m_lastSqlState;
 };
 
 #endif // __POSTGRESQL_DATABASE_LAYER_H__

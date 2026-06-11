@@ -1,6 +1,27 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
+    <ClCompile Include="syntaxHelper\helpChooserDialog.cpp">
+      <Filter>syntaxHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="syntaxHelper\helpDetailView.cpp">
+      <Filter>syntaxHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="syntaxHelper\helpDragSource.cpp">
+      <Filter>syntaxHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="syntaxHelper\helpIndexView.cpp">
+      <Filter>syntaxHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="syntaxHelper\helpPaneView.cpp">
+      <Filter>syntaxHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="syntaxHelper\helpSearchView.cpp">
+      <Filter>syntaxHelper</Filter>
+    </ClCompile>
+    <ClCompile Include="syntaxHelper\helpTreeView.cpp">
+      <Filter>syntaxHelper</Filter>
+    </ClCompile>
     <ClCompile Include="mainFrame\mainFrame.cpp">
       <Filter>mainFrame</Filter>
     </ClCompile>
@@ -45,9 +66,6 @@
     </ClCompile>
     <ClCompile Include="win\dlgs\about.cpp">
       <Filter>win\dlgs</Filter>
-    </ClCompile>
-    <ClCompile Include="docView\docViewCmd.cpp">
-      <Filter>docView</Filter>
     </ClCompile>
     <ClCompile Include="docView\docView.cpp">
       <Filter>docView</Filter>
@@ -797,6 +815,9 @@
     <ClCompile Include="docView\templates\docViewHelp.cpp">
       <Filter>docView\templates</Filter>
     </ClCompile>
+    <ClCompile Include="docView\templates\docViewAuditLog.cpp">
+      <Filter>docView\templates</Filter>
+    </ClCompile>
     <ClCompile Include="win\editor\gridEditor\gridEditorDoc.cpp">
       <Filter>win\editor\gridEditor</Filter>
     </ClCompile>
@@ -955,6 +976,27 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="syntaxHelper\helpChooserDialog.h">
+      <Filter>syntaxHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="syntaxHelper\helpDetailView.h">
+      <Filter>syntaxHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="syntaxHelper\helpDragSource.h">
+      <Filter>syntaxHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="syntaxHelper\helpIndexView.h">
+      <Filter>syntaxHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="syntaxHelper\helpPaneView.h">
+      <Filter>syntaxHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="syntaxHelper\helpSearchView.h">
+      <Filter>syntaxHelper</Filter>
+    </ClInclude>
+    <ClInclude Include="syntaxHelper\helpTreeView.h">
+      <Filter>syntaxHelper</Filter>
+    </ClInclude>
     <ClInclude Include="mainFrame\mainFrame.h">
       <Filter>mainFrame</Filter>
     </ClInclude>
@@ -997,9 +1039,6 @@
     <ClInclude Include="win\dlgs\about.h">
       <Filter>win\dlgs</Filter>
     </ClInclude>
-    <ClInclude Include="docView\docManager.h">
-      <Filter>docView</Filter>
-    </ClInclude>
     <ClInclude Include="docView\docView.h">
       <Filter>docView</Filter>
     </ClInclude>
@@ -1023,6 +1062,12 @@
     </ClInclude>
     <ClInclude Include="win\dlgs\formSelector\formSelector.h">
       <Filter>win\dlgs\formSelector</Filter>
+    </ClInclude>
+    <ClInclude Include="diagnostics\oesApp.h">
+      <Filter>diagnostics</Filter>
+    </ClInclude>
+    <ClInclude Include="diagnostics\oesConsole.h">
+      <Filter>diagnostics</Filter>
     </ClInclude>
     <ClInclude Include="frontend.h" />
     <ClInclude Include="visualView\controlCtor.h">
@@ -1563,6 +1608,9 @@
     <ClInclude Include="docView\templates\docViewHelp.h">
       <Filter>docView\templates</Filter>
     </ClInclude>
+    <ClInclude Include="docView\templates\docViewAuditLog.h">
+      <Filter>docView\templates</Filter>
+    </ClInclude>
     <ClInclude Include="win\dlgs\choiceTemplate.h">
       <Filter>win\dlgs</Filter>
     </ClInclude>
@@ -1710,6 +1758,9 @@
     <ClInclude Include="win\dlgs\lineInput\lineInput.h">
       <Filter>win\dlgs\lineInput</Filter>
     </ClInclude>
+    <ClInclude Include="docView\docManager.h">
+      <Filter>docView</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <Filter Include="session">
@@ -1721,11 +1772,17 @@
     <Filter Include="mainFrame">
       <UniqueIdentifier>{4d75f131-22b3-42a7-90cd-b47e61bcc564}</UniqueIdentifier>
     </Filter>
+    <Filter Include="syntaxHelper">
+      <UniqueIdentifier>{2f5a8d61-3c87-4b9e-a4f6-1d8e2c507b3a}</UniqueIdentifier>
+    </Filter>
     <Filter Include="mainFrame\objinspect">
       <UniqueIdentifier>{5b008341-e88f-4993-8e8d-7caa98ba8c3e}</UniqueIdentifier>
     </Filter>
     <Filter Include="docView">
       <UniqueIdentifier>{442f0471-db57-440c-aa5f-f6a20e933269}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="diagnostics">
+      <UniqueIdentifier>{f9e9c1c0-3c4e-4f43-8b41-9b8f3e0a1d7c}</UniqueIdentifier>
     </Filter>
     <Filter Include="docView\templates">
       <UniqueIdentifier>{de8c1ef4-820a-4c8f-ab29-c012e37d6b0a}</UniqueIdentifier>

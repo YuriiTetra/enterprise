@@ -1,10 +1,5 @@
 #include "valueSpreadsheet.h"
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueSpreadsheetDocumentArea, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueSpreadsheetDocumentBorder, ibValue);
-
-ibValue::ibValueMethodHelper ibValueSpreadsheetDocumentArea::m_methodHelper;
-ibValue::ibValueMethodHelper ibValueSpreadsheetDocumentBorder::m_methodHelper;
 
 enum
 {
@@ -27,25 +22,24 @@ enum
 	eValue
 };
 
-void ibValueSpreadsheetDocumentArea::PrepareNames() const
+void ibValueSpreadsheetDocumentArea::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper.ClearHelper();
-	m_methodHelper.AppendProp(wxT("BackgroundColour"));
-	m_methodHelper.AppendProp(wxT("TextColour"));
-	m_methodHelper.AppendProp(wxT("TextOrient"));
-	m_methodHelper.AppendProp(wxT("Font"));
-	m_methodHelper.AppendProp(wxT("AlignHorizontal"));
-	m_methodHelper.AppendProp(wxT("AlignVertical"));
+	helper.AppendProp(wxT("BackgroundColour"));
+	helper.AppendProp(wxT("TextColour"));
+	helper.AppendProp(wxT("TextOrient"));
+	helper.AppendProp(wxT("Font"));
+	helper.AppendProp(wxT("AlignHorizontal"));
+	helper.AppendProp(wxT("AlignVertical"));
 
-	m_methodHelper.AppendProp(wxT("BorderLeft"));
-	m_methodHelper.AppendProp(wxT("BorderRight"));
-	m_methodHelper.AppendProp(wxT("BorderTop"));
-	m_methodHelper.AppendProp(wxT("BorderBottom"));
+	helper.AppendProp(wxT("BorderLeft"));
+	helper.AppendProp(wxT("BorderRight"));
+	helper.AppendProp(wxT("BorderTop"));
+	helper.AppendProp(wxT("BorderBottom"));
 
-	m_methodHelper.AppendProp(wxT("Size"));
-	m_methodHelper.AppendProp(wxT("ReadOnly"));
+	helper.AppendProp(wxT("Size"));
+	helper.AppendProp(wxT("ReadOnly"));
 
-	m_methodHelper.AppendProp(wxT("Value"));
+	helper.AppendProp(wxT("Value"));
 }
 
 #include "valueFont.h"
@@ -143,12 +137,12 @@ bool ibValueSpreadsheetDocumentArea::GetPropVal(const long lPropNum, ibValue& pv
 	{
 	case eBackgroundColour:
 	{
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueColour>(m_spreadsheetDoc->GetCellBackgroundColour(m_row, m_col));
+		pvarPropVal = new ibValueColour(m_spreadsheetDoc->GetCellBackgroundColour(m_row, m_col));
 		return true;
 	}
 	case eTextColour:
 	{
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueColour>(m_spreadsheetDoc->GetCellTextColour(m_row, m_col));
+		pvarPropVal = new ibValueColour(m_spreadsheetDoc->GetCellTextColour(m_row, m_col));
 		return true;
 	}
 	case eTextOrient:
@@ -159,7 +153,7 @@ bool ibValueSpreadsheetDocumentArea::GetPropVal(const long lPropNum, ibValue& pv
 	}
 	case eFont:
 	{
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueFont>(m_spreadsheetDoc->GetCellFont(m_row, m_col));
+		pvarPropVal = new ibValueFont(m_spreadsheetDoc->GetCellFont(m_row, m_col));
 		return true;
 	}
 	case eAlignmentHorz:
@@ -181,30 +175,30 @@ bool ibValueSpreadsheetDocumentArea::GetPropVal(const long lPropNum, ibValue& pv
 	case eBorderLeft:
 	{
 		const ibSpreadsheetBorderDescription& borderDesc = m_spreadsheetDoc->GetCellBorderLeft(m_row, m_col);
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocumentBorder>(borderDesc.m_style, borderDesc.m_colour, borderDesc.m_width);
+		pvarPropVal = new ibValueSpreadsheetDocumentBorder(borderDesc.m_style, borderDesc.m_colour, borderDesc.m_width);
 		return true;
 	}
 	case eBorderRight:
 	{
 		const ibSpreadsheetBorderDescription& borderDesc = m_spreadsheetDoc->GetCellBorderRight(m_row, m_col);
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocumentBorder>(borderDesc.m_style, borderDesc.m_colour, borderDesc.m_width);
+		pvarPropVal = new ibValueSpreadsheetDocumentBorder(borderDesc.m_style, borderDesc.m_colour, borderDesc.m_width);
 		return true;
 	}
 	case eBorderTop:
 	{
 		const ibSpreadsheetBorderDescription& borderDesc = m_spreadsheetDoc->GetCellBorderTop(m_row, m_col);
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocumentBorder>(borderDesc.m_style, borderDesc.m_colour, borderDesc.m_width);
+		pvarPropVal = new ibValueSpreadsheetDocumentBorder(borderDesc.m_style, borderDesc.m_colour, borderDesc.m_width);
 		return true;
 	}
 	case eBorderBottom:
 	{
 		const ibSpreadsheetBorderDescription& borderDesc = m_spreadsheetDoc->GetCellBorderBottom(m_row, m_col);
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueSpreadsheetDocumentBorder>(borderDesc.m_style, borderDesc.m_colour, borderDesc.m_width);
+		pvarPropVal = new ibValueSpreadsheetDocumentBorder(borderDesc.m_style, borderDesc.m_colour, borderDesc.m_width);
 		return true;
 	}
 	case eSize:
 	{
-		ibValuePtr<ibValueSize> valueSize(ibValue::CreateAndPrepareValueRef<ibValueSize>());
+		ibValuePtr<ibValueSize> valueSize(new ibValueSize());
 		m_spreadsheetDoc->GetCellSize(m_row, m_col, &valueSize->m_size.x, &valueSize->m_size.y);
 		pvarPropVal = valueSize;
 		return true;

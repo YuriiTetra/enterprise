@@ -1,15 +1,32 @@
 # Paged data fetching for ibValueListDataObject / ibValueModelTreeDataObject
 
-**Status:** Phase 4 + tape paging shipped, evolved into universal
-`Get*Fetch` architecture (§8). Backend Fetch contract is shared by
-desktop wxDataView fork, headless callers, and the upcoming web
-frontend. Sections 1-7 describe the original templated buffer design
-(landed); §8 documents the consolidated direction we converged on
-during the 2026-05-05 session.
+**Status:** **The universal `Get*Fetch` contract (§8) is what lives
+in code today.** Sections 1-7 describe an earlier templated-buffer
+design (`ibTableViewBuffer` / `ibTreeViewBuffer` / `ibPagingLog`)
+that **did not survive** the §8 convergence — those symbols are
+**not** in the current tree. The actual paging implementation is:
+`ibFetchAnchor / ibFetchRequest / ibFetchResponse` templates in
+`backend/tableInfo.h`, per-model `GetFirstFetch / GetNextFetch /
+GetPrevFetch` virtuals on `ibDataViewModel` + `ibValueModel`,
+control-driven prefetch + lying scrollbar inside `ibDataViewCtrl`.
+Keep §1-7 as design history; treat §8 as the canonical reference.
+Backend Fetch contract shared by desktop wxDataView fork, headless
+callers, and the upcoming web frontend.
 
 **Goal:** unified, well-behaved batched fetch for OES dynamic lists and trees.
 The GUI must not stall on scroll, must not double-fetch, must support lazy tree
 expansion, and must remain coherent when filter / sort / view-mode change.
+
+## Table of contents
+
+1. [Current state](#1-current-state)
+2. [Known issues](#2-known-issues)
+3. [Target design](#3-target-design)
+4. [Migration plan](#4-migration-plan)
+5. [Open questions / pre-work](#5-open-questions--pre-work)
+6. [Out of scope](#6-out-of-scope)
+7. [Files touched (planned)](#7-files-touched-planned)
+8. [Evolved architecture — universal `Get*Fetch` (2026-05-05)](#8-evolved-architecture--universal-getfetch-2026-05-05)
 
 ## 1. Current state
 
@@ -376,17 +393,14 @@ Each landed concrete class:
   unreachable when `IsPaged()` is on. Removal — Phase 7.
 * `FindRowByKey` deferred (selection re-locate audit pending; see §5).
 
-### Phase 4 diagnostics — `ibPagingLog` ✅ landed 2026-05-05
-`BACKEND_API void ibPagingLog(const char* fmt, ...)` — single sink,
-emits to `wxLogDebug` (Debug-only) and appends a timestamped line to
-`paging.log` in the working directory (any build).  Wired at:
-* Buffer entry points: `NotifyViewportChanged`, `ResetForFilterOrSort`,
-  `DispatchReset` / `Forward` / `Backward`.
-* All three Fetch impls: entry (table + count + anchor + direction),
-  full SQL after build (Ref only), post-exec (rows + hasMore).
-
-Open the file alongside the running enterprise / wes process to trace
-buffer / fetch behaviour without attaching a debugger.
+### Phase 4 diagnostics — `ibPagingLog` (retired)
+The `ibPagingLog` sink was useful during the 2026-05-05..09 paging
+arc and has since been stripped from the tree (no occurrences in
+`src/engine/`). The lying-scrollbar / control-driven prefetch design
+proved stable enough that the per-row diagnostic file (`paging.log`)
+became more noise than signal. Prefer `wxLogDebug` at coarse entry
+points (`PagedRefresh`, `PagedBootstrap`, `OnPagedFetch{Forward,Backward}Result`)
+when revisiting paging behaviour.
 
 ### Phase 5 — eviction + refcount pinning
 * `PinForSelection` / `UnpinForSelection` wired to control's `Select` /
@@ -541,18 +555,16 @@ Existing ctor signature `(void*)` preserved for ABI; cast to
 `wxRefCounter*` internally — every OES row class (`ibValueTreeNode`,
 `ibValueTableRow` and subclasses) inherits `wxRefCounter`.
 
-**Open**: ownership transport convention for `Get*Fetch` results.
-Currently `vector<TRow*>` raw pointers; caller IncRefs via item ctor
-but no explicit DecRef on the initial allocation refcount → leak. Two
-clean fixes:
-
-1. Switch result transport to `vector<wxRefPtr<TRow>>` — auto-Adopt
-   on push, auto-DecRef on destroy. No manual cleanup.
-2. Add `AdoptTag` ctor on `ibDataViewItem` that takes ownership of
-   the initial refcount without an extra IncRef; caller uses it for
-   transfer. Existing copy ctor stays IncRef'ing.
-
-Pick one before turning paged Fetch on for real workloads.
+**Resolved** (2026-05-05, verified 2026-06-06): ownership transport for
+`Get*Fetch` results. Typed Fetch hands out `vector<TRow*>` with refcount=1;
+`ibValueModel::AdoptRowsToItems` (tableInfo.h) adopts them — the typed
+`ibDataViewItem(ibDataViewObject*)` ctor IncRefs to 2, then `r->DecRef()`
+drops the initial allocation reference so `out` owns exactly one ref per
+row. Every typed→universal bridge routes through it (objectListQuery, register
+fetch). The `.get()` paths (auditLog `m_rowObjects`, predefinedEditor) borrow
+model-owned rows — item IncRef/DecRef is balanced, model keeps the row alive.
+No leak path remains. (Chose option 2's adopt-semantics, kept the existing
+IncRef'ing copy ctor for the borrow paths.)
 
 ### 8.4 View modes (List / Tree / Hierarchy)
 
@@ -610,7 +622,7 @@ re-fetches via `Get*Fetch`.
 
 | feature | state |
 |---|---|
-| `ibTableViewBuffer<TKey,TRow>` tape paging (Ref) | ✅ landed Phase 4 |
+| Tape paging on Ref via per-model `Fetch(req)` + dispatcher in `ibDataViewCtrl` | ✅ landed Phase 4 — original `ibTableViewBuffer` template did not survive the §8 convergence; functionality moved into the control |
 | `ibValueListSqlBuilder` (filter/order/cursor) | ✅ landed |
 | Single-batch paged Enum / Register | ✅ landed |
 | `ibPagingLog` diagnostics → `paging.log` | ✅ landed |
@@ -631,6 +643,9 @@ re-fetches via `Get*Fetch`.
 | Per-direction in-flight fetch counters | ✅ landed 2026-05-06 — `m_pagedFetchingFwd / m_pagedFetchingBwd` independent so a scroll burst that crosses both edges can dispatch to each side without serialising (was a single counter pre-2026-05-06) |
 | Soft-eviction via `wxDataViewTreeNode::SetHidden(bool)` | ✅ landed 2026-05-06 — hidden nodes stay in `m_children` but are skipped by walkers and excluded from `subTreeCount`; backward scroll re-shows fetched rows from the hidden head instead of going to DB. Replaces the un-hide-everything anti-pattern flagged in 2026-05-05's «Scroll polish» |
 | 3-state lying scrollbar (THUMB drag fix) | ✅ landed 2026-05-06 — `IsPagedScrollbarMode / DerivePagedThumb / UpdatePagedScrollbar / AdjustScrollbars / SetScrollPos / SetScrollbar` overrides force the thumb to {Top, Middle, Bottom} from `m_pagedHasMoreFwd / m_pagedHasMoreBwd` regardless of `wxScrollHelper`'s real-virtual-size value. Thumb drag no longer chains many fetch ticks |
+| Horizontal scroll regression from the 3-state scrollbar | ✅ fixed 2026-06-06 — `OnScrollEvent` had no orientation guard, so on a paged model it caught HORIZONTAL `EVT_SCROLLWIN` too: a horizontal thumb drag (`THUMBRELEASE`) hit the vertical-paging branch and returned without `event.Skip()` (swallowed → content never scrolled sideways), and horizontal line/page events mis-fired vertical `PagedFetch`. Symptom: "many columns → no usable bottom scrollbar". Fix: early `if (event.GetOrientation() != wxVERTICAL) { event.Skip(); return; }` at the top of `OnScrollEvent`. Plus `UpdateColumnSizes` now publishes the real `colswidth` virtual size in the can't-shrink-last-column branch instead of leaving a stale 0 |
+| Non-paged `ibDataViewCtrl` never got a usable scrollbar (root of the above) | ✅ fixed 2026-06-06 — `wxScrollHelper::AdjustScrollbars` derives range as `virtualSize / pixelsPerLine`, and the **scroll rate was 0** for non-paged controls because `SetScrollRate` was only called from `RecalculateDisplay` (which early-returns when the model is null / seldom runs for a doc-form tablebox). With rate 0 the scrollbar never appears no matter the virtual size (diagnosed via `HasScrollbar`/`SetScrollbar` logging: `virtX=1647` vs `clientX=611` yet range=0). Fix: `CalcWindowSizes` now sets the x-rate (`SetScrollRate(FromDIP(10), curY)`, preserving the y-rate so the vertical scrollbar stays owned by RecalculateDisplay/paged path and doesn't pop up on empty tables) and defers `AdjustScrollbars` to `OnInternalIdle` via `m_calcScrollPending` (anti-flicker). Paged controls always worked because the paging machine keeps RecalculateDisplay running |
+| ⚠ OPEN: vertical scrollbar flashes on the right while a list/document form opens | NOT FIXED 2026-06-06 — **not the dataview** (proven: `ibDataViewCtrl::HasScrollbar(wxVERTICAL)` is never true; its `SetScrollbar(wxVERTICAL,…)` range is always 0). The flash is the **form host `ibVisualHost` (`wxScrolledWindow`)**: `UpdateVirtualSize()` runs during the form build while the host client is a tiny placeholder (~16px) and sets virtual = content panel **+50px** (~70px) → virtual ≫ client → native scrollbars appear, then hide once the host grows to its real size. `Freeze()` does NOT suppress them (Win32 native scrollbars are non-client). Tried & reverted (didn't help): freezing the host itself during build; skipping `UpdateVirtualSize` while frozen + recomputing on a host `wxEVT_SIZE`. Real fix needs a form-host lifecycle change (defer scroll setup until the host has its final size / rework the `+50` margin / build hidden then show) — touches every form's scrolling, needs its own focused PR + testing. Constructor sets `SetScrollRate(5,5)` (`visualHost.h`); virtual size set in `ibVisualHost::UpdateVirtualSize` (`visualHost.cpp`) |
 | Hierarchical drill chain pin | ✅ landed 2026-05-06 — `m_topParentChain` (refcount-pinned `ibDataViewItem` array) survives `Cleared() / DestroyTree`; replaces a single anchor that was wiped on re-fetch |
 | wxDVC sort suppression for paged | ✅ landed 2026-05-06 — `ibDataViewMainWindow::GetSortOrder()` returns empty `SortOrder()` when the model `IsPagedModel()` so the fork's `InsertChild` appends in fetch order rather than scattering rows via binary-search insertion |
 | Ownership-transport convention (`AdoptRowsToItems` / Append / Insert) | ✅ landed 2026-05-05 — `ibValueModel::AdoptRowsToItems` template; FolderRef bridges use it; tape-buffer Apply path already adopts via `Append`/`Insert` |

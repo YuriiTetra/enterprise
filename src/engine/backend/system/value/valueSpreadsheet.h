@@ -4,9 +4,11 @@
 #include "backend/compiler/value.h"
 #include "backend/backend_spreadsheet.h"
 
+void ibValueSpreadsheetDocument_BindNames(ibValue::ibMemberTable& helper, const ibValue* ctx);
+
 class BACKEND_API ibValueSpreadsheetDocument :
-	public ibValue {
-public:
+	public ibValueStaticMembers<&ibValueSpreadsheetDocument_BindNames> {
+	public:
 
 	wxObjectDataPtr<ibBackendSpreadsheetObject> GetSpreadsheetDocument() const { return m_spreadsheetDoc; }
 
@@ -14,7 +16,7 @@ public:
 	const ibSpreadsheetDescription& GetSpreadsheetDesc() const { return m_spreadsheetDoc->GetSpreadsheetDesc(); }
 
 	ibValueSpreadsheetDocument(const ibSpreadsheetDescription& spreadsheetDesc = ibSpreadsheetDescription()) :
-		ibValue(ibValueTypes::TYPE_VALUE), m_spreadsheetDoc(new ibBackendSpreadsheetObject(spreadsheetDesc)) {
+		ibValueStaticMembers(ibValueTypes::TYPE_VALUE), m_spreadsheetDoc(new ibBackendSpreadsheetObject(spreadsheetDesc)) {
 	}
 
 	virtual bool IsEmpty() const { return m_spreadsheetDoc->IsEmptyDocument(); }
@@ -25,24 +27,17 @@ public:
 	virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);       //function call
 	virtual bool CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray);       //procudre call
 
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return &m_methodHelper;
-	}
-
-	virtual void PrepareNames() const; // this method is automatically called to initialize attribute and method names.
+	// DoGetPMethods (protected) + Shared<&ibValueSpreadsheetDocument_BindNames> come from the base.
 
 private:
 	wxObjectDataPtr<ibBackendSpreadsheetObject> m_spreadsheetDoc;
-	static ibValueMethodHelper m_methodHelper;
-	wxDECLARE_DYNAMIC_CLASS(ibValueSpreadsheetDocument);
 };
 
 #pragma region enumeration 
 #include "backend/compiler/enumUnit.h"
 class BACKEND_API ibValueEnumSpreadsheetOrient :
 	public ibValueEnumeration<ibSpreadsheetOrientation> {
-public:
+	public:
 
 	ibValueEnumSpreadsheetOrient() : ibValueEnumeration() {}
 
@@ -52,12 +47,11 @@ public:
 	}
 
 private:
-	wxDECLARE_DYNAMIC_CLASS(ibValueEnumSpreadsheetOrient);
 };
 
 class BACKEND_API ibValueEnumSpreadsheetHorizontalAlignment :
 	public ibValueEnumeration<ibSpreadsheetAlignmentHorz> {
-public:
+	public:
 
 	ibValueEnumSpreadsheetHorizontalAlignment() : ibValueEnumeration() {}
 
@@ -68,12 +62,11 @@ public:
 	}
 
 private:
-	wxDECLARE_DYNAMIC_CLASS(ibValueEnumSpreadsheetHorizontalAlignment);
 };
 
 class BACKEND_API ibValueEnumSpreadsheetVerticalAlignment :
 	public ibValueEnumeration<ibSpreadsheetAlignmentVert> {
-public:
+	public:
 
 	ibValueEnumSpreadsheetVerticalAlignment() : ibValueEnumeration() {}
 
@@ -84,12 +77,11 @@ public:
 	}
 
 private:
-	wxDECLARE_DYNAMIC_CLASS(ibValueEnumSpreadsheetVerticalAlignment);
 };
 
 class BACKEND_API ibValueEnumSpreadsheetFitMode :
 	public ibValueEnumeration<ibSpreadsheetFitMode> {
-public:
+	public:
 
 	ibValueEnumSpreadsheetFitMode() : ibValueEnumeration() {}
 
@@ -99,12 +91,11 @@ public:
 	}
 
 private:
-	wxDECLARE_DYNAMIC_CLASS(ibValueEnumSpreadsheetFitMode);
 };
 
 class BACKEND_API ibValueEnumSpreadsheetBorder :
 	public ibValueEnumeration<ibSpreadsheetPenStyle> {
-public:
+	public:
 
 	ibValueEnumSpreadsheetBorder() : ibValueEnumeration() {}
 
@@ -119,12 +110,11 @@ public:
 
 private:
 
-	wxDECLARE_DYNAMIC_CLASS(ibValueEnumSpreadsheetBorder);
 };
 
 class BACKEND_API ibValueEnumSpreadsheetFillType :
 	public ibValueEnumeration<ibSpreadsheetFillType> {
-public:
+	public:
 
 	ibValueEnumSpreadsheetFillType() : ibValueEnumeration() {}
 
@@ -136,17 +126,19 @@ public:
 
 private:
 
-	wxDECLARE_DYNAMIC_CLASS(ibValueEnumSpreadsheetFillType);
 };
 #pragma endregion 
 
 class BACKEND_API ibValueSpreadsheetDocumentArea :
-	public ibValue {
-public:
+	public ibValueDynamicMembers {
+	public:
 
-	ibValueSpreadsheetDocumentArea() : ibValue(ibValueTypes::TYPE_VALUE), m_row(-1), m_col(-1), m_spreadsheetDoc() {}
+	ibValueSpreadsheetDocumentArea() : ibValueDynamicMembers(ibValueTypes::TYPE_VALUE), m_row(-1), m_col(-1), m_spreadsheetDoc() {
+		m_members.Bind(this, &ibValueSpreadsheetDocumentArea::FillMembers);
+	}
 	ibValueSpreadsheetDocumentArea(wxObjectDataPtr<ibBackendSpreadsheetObject>& spreadsheetDoc, int row, int col) :
-		ibValue(ibValueTypes::TYPE_VALUE), m_row(row), m_col(col), m_spreadsheetDoc(spreadsheetDoc) {
+		ibValueDynamicMembers(ibValueTypes::TYPE_VALUE), m_row(row), m_col(col), m_spreadsheetDoc(spreadsheetDoc) {
+		m_members.Bind(this, &ibValueSpreadsheetDocumentArea::FillMembers);
 	}
 
 	virtual bool IsEmpty() const { return m_spreadsheetDoc->IsEmptyCell(m_row, m_col); }
@@ -157,24 +149,18 @@ public:
 	virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);       //function call
 	virtual bool CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray);       //procudre call
 
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return &m_methodHelper;
-	}
-
-	virtual void PrepareNames() const; // this method is automatically called to initialize attribute and method names.
+	void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 private:
 
 	int m_row, m_col;
 	wxObjectDataPtr<ibBackendSpreadsheetObject> m_spreadsheetDoc;
-	static ibValueMethodHelper m_methodHelper;
 
-	wxDECLARE_DYNAMIC_CLASS(ibValueSpreadsheetDocumentArea);
 };
 
 class BACKEND_API ibValueSpreadsheetDocumentBorder :
-	public ibValue {
+	public ibValueDynamicMembers {
+	public:
 
 	enum
 	{
@@ -190,7 +176,8 @@ public:
 	int GetWidth() const { return m_width; }
 
 	ibValueSpreadsheetDocumentBorder(wxPenStyle style = wxPENSTYLE_TRANSPARENT, const wxColour& colour = *wxBLACK, int width = 1) :
-		ibValue(ibValueTypes::TYPE_VALUE), m_style(style), m_colour(colour), m_width(width) {
+		ibValueDynamicMembers(ibValueTypes::TYPE_VALUE), m_style(style), m_colour(colour), m_width(width) {
+		m_members.Bind(this, &ibValueSpreadsheetDocumentBorder::FillMembers);
 	}
 
 	virtual bool IsEmpty() const { return false; }
@@ -198,21 +185,13 @@ public:
 	virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal);        //setting attribute
 	virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal);                   //attribute value
 
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return &m_methodHelper;
-	}
-
-	virtual void PrepareNames() const; // this method is automatically called to initialize attribute and method names.
+	void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 private:
 	wxPenStyle m_style = wxPENSTYLE_TRANSPARENT;
 	wxColour m_colour = *wxBLACK;
 	int m_width = 1;
 
-	static ibValueMethodHelper m_methodHelper;
-
-	wxDECLARE_DYNAMIC_CLASS(ibValueSpreadsheetDocumentBorder);
 };
 
 #endif 

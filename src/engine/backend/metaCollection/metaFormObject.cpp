@@ -9,6 +9,7 @@
 #include "backend/metaCollection/partial/commonObject.h"
 #include "backend/appData.h"
 #include "backend/backend_metatree.h"
+#include "backend/system/systemManager.h"
 
 // ibDeferredForm impl — defined here where ibValueMetaObjectGenericData
 // (parent's CreateObjectForm) and formWrapper are fully visible.
@@ -55,7 +56,6 @@ bool ibBackendCommandItem::ShowFormByCommandType(ibInterfaceCommandType cmdType)
 // ibValueMetaObjectFormBase
 // -----------------------------------------------------------------------
 
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueMetaObjectFormBase, ibValueMetaObjectModule);
 
 //***********************************************************************
 //*                          common value object                        *
@@ -121,6 +121,14 @@ ibBackendValueForm* ibValueMetaObjectFormBase::CreateAndBuildForm(const ibValueM
 		try {
 			success = result->InitializeFormModule();
 		}
+		catch (const ibBackendException& err) {
+			// Surface it — don't let a form-module compile/run error or a missing
+			// required binding vanish (the old catch(...) made the form silently
+			// fail to open with no clue why).
+			ibValueSystemFunction::Message(err.GetErrorDescription(),
+				ibStatusMessage::ibStatusMessage_Error);
+			success = false;
+		}
 		catch (...) {
 			success = false;
 		}
@@ -170,7 +178,6 @@ ibValueMetaObjectFormBase::ibValueMetaObjectFormBase(const wxString& name, const
 	SetDefaultProcedure(wxT("RefreshDisplay"), ibContentHelper::eProcedureHelper);
 }
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectForm, ibValueMetaObjectFormBase)
 
 //***********************************************************************
 //*                            Metaform                                 *
@@ -230,9 +237,7 @@ bool ibValueMetaObjectForm::OnCreateMetaObject(ibMetaData* metaData, int flags)
 
 	if ((flags & newObjectFlag) != 0) {
 
-		ibValueMetaObjectGenericData* metaObject = wxDynamicCast(
-			m_parent, ibValueMetaObjectGenericData
-		);
+		ibValueMetaObjectGenericData* metaObject = dynamic_cast<ibValueMetaObjectGenericData*>(m_parent);
 
 		wxASSERT(metaObject);
 
@@ -273,7 +278,7 @@ bool ibValueMetaObjectForm::OnSaveMetaObject(int flags)
 
 bool ibValueMetaObjectForm::OnDeleteMetaObject()
 {
-	ibValueMetaObjectGenericData* metaObject = wxDynamicCast(m_parent, ibValueMetaObjectGenericData);
+	ibValueMetaObjectGenericData* metaObject = dynamic_cast<ibValueMetaObjectGenericData*>(m_parent);
 	wxASSERT(metaObject);
 	metaObject->OnRemoveMetaForm(this);
 
@@ -289,15 +294,16 @@ bool ibValueMetaObjectForm::OnAfterRunMetaObject(int flags)
 {
 	if (auto* cc = m_metaData->GetCompileCache()) {
 
-		ibValueMetaObjectGenericData* metaObject = wxDynamicCast(m_parent, ibValueMetaObjectGenericData);
+		ibValueMetaObjectGenericData* metaObject = dynamic_cast<ibValueMetaObjectGenericData*>(m_parent);
 		wxASSERT(metaObject);
 
 		// Defer the actual form build — passing an eager CreateObjectForm
 		// result here would need session->m_root compiled, but CompileRoot
-		// only fires after RunDatabase finishes. The cache's overloaded
-		// AddCompileModule accepts an ibDeferredForm and materializes
-		// it on first FindCompileModule lookup.
-		return cc->AddCompileModule(this, ibDeferredForm(metaObject, this));
+		// only fires after RunDatabase finishes. The cache stores a builder
+		// and materializes it on first FindCompileModule lookup.
+		return cc->AddCompileModule(this, [deferred = ibDeferredForm(metaObject, this)]() -> ibValue* {
+			return deferred.Construct();
+		});
 	}
 
 	return ibValueMetaObjectFormBase::OnAfterRunMetaObject(flags);
@@ -323,7 +329,6 @@ bool ibValueMetaObjectForm::OnAfterCloseMetaObject()
 //*                           CommonFormObject metaData                 *
 //***********************************************************************
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectCommonForm, ibValueMetaObjectFormBase)
 
 ibValueMetaObjectCommonForm::ibValueMetaObjectCommonForm(const wxString& name, const wxString& synonym, const wxString& comment) : ibValueMetaObjectFormBase(name, synonym, comment) {}
 

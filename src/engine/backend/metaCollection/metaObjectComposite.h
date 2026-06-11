@@ -82,8 +82,7 @@ class ibCtorMetaValueType;
 
 class BACKEND_API ibValueMetaObjectCompositeData
 	: public ibValueMetaObject {
-	wxDECLARE_ABSTRACT_CLASS(ibValueMetaObjectCompositeData);
-public:
+	public:
 
 	ibValueMetaObjectCompositeData(
 		const wxString& strName = wxEmptyString,
@@ -141,7 +140,7 @@ public:
 #pragma endregion 
 #pragma region __filter_h__
 
-	//predefined 
+	//predefined
 	template <typename _T1>
 	ibValueMetaObjectAttributeBase* FindPredefinedAttributeObjectByFilter(const _T1& id) const {
 		return FindObjectByFilter<ibValueMetaObjectAttributeBase>(id, { g_metaPredefinedAttributeCLSID });

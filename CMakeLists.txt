@@ -66,6 +66,18 @@ option(OES_USE_POSTGRESQL  "Enable PostgreSQL database driver"  OFF)
 option(OES_USE_MYSQL       "Enable MySQL database driver"       OFF)
 option(OES_USE_ODBC        "Enable ODBC database driver"        OFF)
 
+# Phase-6 local FB server — required for shared-file (leader-election)
+# deployments so the leader process can expose a TCP listener that
+# followers connect to. ON by default since leader-mode is the primary
+# multi-user story for the FB driver. The `firebird.exe` binary is not
+# vendored in the repo (~5 MB, version-specific); operator drops FB 5's
+# `bin/firebird.exe` into `src/engine/backend/databaseLayer/firebird/
+# engine/dll/` and it gets copied into `_fb/` at build time. Build still
+# works without the binary, but leader-mode will degrade to embedded-
+# only single-user. Turn OFF to exclude the spawn code entirely (saves
+# ~20 KB, drops winsock dependency in the TU).
+option(OES_FB_LOCALSERVER  "Enable Firebird out-of-process local server (Phase 6)" ON)
+
 # SQLite is always available (embedded sources in the project).
 
 # ---------------------------------------------------------------------------
@@ -116,8 +128,13 @@ add_compile_definitions(
 # ---------------------------------------------------------------------------
 
 if(MSVC)
-    # Match the MSBuild settings: fast floating point, RTTI enabled, W1
-    add_compile_options(/fp:fast /GR /W1)
+    # Match the MSBuild settings: fast floating point, RTTI enabled, W1, and
+    # /MP multi-processor compilation (the .vcxproj files already set
+    # <MultiProcessorCompilation>true</MultiProcessorCompilation>). Without /MP
+    # a single big target like backend compiles its hundreds of .cpp serially
+    # even under `cmake --build --parallel` (which only parallelises across
+    # targets) — /MP fans them across cores.
+    add_compile_options(/fp:fast /GR /W1 /MP /bigobj)
     # Suppress the same warnings disabled in the .vcxproj files
     add_compile_options(/wd4251 /wd4275 /wd4458)
 else()
@@ -171,7 +188,11 @@ add_subdirectory("${OES_3RDPARTY_DIR}/wxWidgets" "${CMAKE_BINARY_DIR}/wxWidgets"
 # ---------------------------------------------------------------------------
 
 if(OES_USE_FIREBIRD)
-    # Firebird client library (fbclient)
+    # fbclient is loaded dynamically at runtime (firebirdInterface.cpp ->
+    # wxDynamicLibrary::Load("fbclient")) and the driver compiles against the
+    # in-tree headers under databaseLayer/firebird/engine. A system fbclient is
+    # therefore NOT required to build or link — locate it only opportunistically
+    # so packagers that prefer an explicit dependency can still find it.
     find_library(FIREBIRD_LIBRARY NAMES fbclient fbclient_ms
         HINTS
             "$ENV{FIREBIRD_HOME}/lib"
@@ -181,31 +202,29 @@ if(OES_USE_FIREBIRD)
             "/usr/local/lib"
             "/opt/firebird/lib"
     )
-    find_path(FIREBIRD_INCLUDE_DIR NAMES ibase.h
-        HINTS
-            "$ENV{FIREBIRD_HOME}/include"
-            "/Library/Frameworks/Firebird.framework/Versions/A/Headers"
-            "/usr/include"
-            "/usr/local/include"
-            "/opt/firebird/include"
-    )
-    if(FIREBIRD_LIBRARY AND FIREBIRD_INCLUDE_DIR)
-        message(STATUS "Firebird found: ${FIREBIRD_LIBRARY}")
-        add_library(Firebird::Firebird UNKNOWN IMPORTED)
-        set_target_properties(Firebird::Firebird PROPERTIES
-            IMPORTED_LOCATION "${FIREBIRD_LIBRARY}"
-            INTERFACE_INCLUDE_DIRECTORIES "${FIREBIRD_INCLUDE_DIR}"
-        )
-        add_compile_definitions(OES_USE_FIREBIRD)
+    add_compile_definitions(OES_USE_FIREBIRD)
+    if(FIREBIRD_LIBRARY)
+        message(STATUS "Firebird client found (optional): ${FIREBIRD_LIBRARY}")
     else()
-        message(FATAL_ERROR "OES_USE_FIREBIRD is ON but Firebird client library was not found.")
+        message(STATUS "Firebird client not found — driver loads fbclient dynamically at runtime")
+    endif()
+    if(OES_FB_LOCALSERVER)
+        add_compile_definitions(OES_FB_LOCALSERVER)
+        message(STATUS "OES_FB_LOCALSERVER: ON — firebird.exe must be present in _fb/ at runtime")
     endif()
 endif()
 
 if(OES_USE_POSTGRESQL)
-    find_package(PostgreSQL REQUIRED)
+    # libpq is likewise loaded dynamically at runtime and the driver compiles
+    # against the in-tree headers under databaseLayer/postgres/engine, so a
+    # system libpq is not required to build. Locate it only opportunistically.
+    find_package(PostgreSQL QUIET)
     add_compile_definitions(OES_USE_POSTGRESQL)
-    message(STATUS "PostgreSQL found: ${PostgreSQL_LIBRARIES}")
+    if(PostgreSQL_FOUND)
+        message(STATUS "PostgreSQL client found (optional): ${PostgreSQL_LIBRARIES}")
+    else()
+        message(STATUS "PostgreSQL client not found — driver loads libpq dynamically at runtime")
+    endif()
 endif()
 
 if(OES_USE_MYSQL)
@@ -281,7 +300,6 @@ endif()
 #   designer      — executable      (GUI subsystem)
 #   launcher      — executable      (GUI subsystem)
 #   codeRunner    — executable      (GUI subsystem)
-#   classChecker  — executable      (GUI subsystem)
 #   simplePlugin  — SHARED library  (plugin example)
 #   wfrontend     — SHARED library  (web variant of frontend, OES_USE_WEB)
 #   wenterprise-server — executable (HTTP server for web client)
@@ -295,7 +313,6 @@ add_subdirectory("${OES_ENGINE_DIR}/enterprise")
 add_subdirectory("${OES_ENGINE_DIR}/designer")
 add_subdirectory("${OES_ENGINE_DIR}/launcher")
 add_subdirectory("${OES_ENGINE_DIR}/codeRunner")
-add_subdirectory("${OES_ENGINE_DIR}/classChecker")
 add_subdirectory("${OES_ENGINE_DIR}/simplePlugin")
 
 # ---------------------------------------------------------------------------

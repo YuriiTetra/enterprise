@@ -4,6 +4,16 @@
 #include "translateCode.h"
 #include "compileContext.h"
 
+// One entry in a module's context-variable map. scopeContext marks a
+// transparent container (Manager / EnumManager / SystemManager): its
+// methods flatten into the surrounding scope, and its OWN name is NOT an
+// identifier in the code editor. Default false — a bound value's name is
+// visible (ThisObject / ThisForm / export vars).
+struct ibContextVar {
+	ibValue* m_value = nullptr;
+	bool m_scopeContext = false;
+};
+
 //*******************************************************************
 //*							  Class: compiler                       *
 //*******************************************************************
@@ -50,8 +60,10 @@ public:
 	void AddVariable(const wxString& strName, const ibValue& value);	// support for external variables
 	void AddVariable(const wxString& strName, ibValue* pValue);		// support for external variables
 
-	void AddContextVariable(const wxString& strName, const ibValue& value);
-	void AddContextVariable(const wxString& strName, ibValue* pValue);
+	void AddContextVariable(const wxString& strName, const ibValue& value, bool scopeContext = false);
+	void AddContextVariable(const wxString& strName, ibValue* pValue, bool scopeContext = false);
+
+	void AddLocalVariable(const wxString& strName, ibValue* pValue);	// bound local — binder-filled frame slot
 
 	void RemoveVariable(const wxString& strName);
 
@@ -108,7 +120,8 @@ public:
 	ibByteBinder CreateBinder(bool delta = true) {
 		ibByteBinder br = m_cByteCode.CreateBinder(delta);
 		for (auto& kv : m_listExternValue)  br.SetVar(kv.first, kv.second);
-		for (auto& kv : m_listContextValue) br.SetVar(kv.first, kv.second);
+		for (auto& kv : m_listContextValue) br.SetVar(kv.first, kv.second.m_value);
+		for (auto& kv : m_listLocalValue)   br.SetVar(kv.first, kv.second);
 		return br;
 	}
 
@@ -147,7 +160,13 @@ public:
 	std::map<wxString, ibValue*> m_listExternValue;
 
 	// matching context variables
-	std::map<wxString, ibValue*> m_listContextValue;
+	std::map<wxString, ibContextVar> m_listContextValue;
+
+	// bound LOCAL variables — registered as plain frame locals (kind=Local, NOT
+	// External/Context), the binder fills the slot at init; the module body reads/
+	// writes them as ordinary locals (e.g. a constant's Value). No required/type
+	// pre-flight, no kind opcode — a normal slot.
+	std::map<wxString, ibValue*> m_listLocalValue;
 
 protected:
 
@@ -170,7 +189,7 @@ protected:
 
 	void GETKeyWord(int nKey);
 
-	// strRealName — return source-case string from m_valData.m_sData
+	// strRealName — return source-case string from m_valData (via GetString())
 	//   (otherwise the uppercase m_strData is returned).
 	// acceptKeyword — accept a KEYWORD lexem as if it were an identifier;
 	//   used in property-access positions (`obj.<X>`) where contextual

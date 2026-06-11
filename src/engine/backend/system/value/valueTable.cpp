@@ -8,10 +8,7 @@
 
 //////////////////////////////////////////////////////////////////////
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueModelTable, ibValueModelRamTableBase);
 
-//////////////////////////////////////////////////////////////////////
-ibValue::ibValueMethodHelper ibValueModelTable::m_methodHelper;
 //////////////////////////////////////////////////////////////////////
 
 ibDataViewItem ibValueModelTable::FindRowValue(const ibValue& varValue, const wxString& colName) const
@@ -31,35 +28,32 @@ ibDataViewItem ibValueModelTable::FindRowValue(const ibValue& varValue, const wx
 }
 
 ibValueModelTable::ibValueModelTable() : ibValueModelRamTableBase(),
-m_tableColumnCollection(ibValue::CreateAndPrepareValueRef<ibValueModelTableColumnCollection>(this))
+m_tableColumnCollection(new ibValueModelTableColumnCollection(this))
 {
+	m_members.Bind(this, &ibValueModelTable::FillMembers);
 }
 
 ibValueModelTable::ibValueModelTable(const ibValueModelTable& valueTable) : ibValueModelRamTableBase(),
 m_tableColumnCollection(valueTable.m_tableColumnCollection)
 {
+	m_members.Bind(this, &ibValueModelTable::FillMembers);
 }
 
 ibValueModelTable::~ibValueModelTable()
 {
 }
 
-void ibValueModelTable::PrepareNames() const
+void ibValueModelTable::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper.ClearHelper();
+	helper.AppendFunc(wxT("Add"), wxT("Add()"));
+	helper.AppendFunc(wxT("Clone"), wxT("Clone()"));
+	helper.AppendFunc(wxT("Count"), wxT("Count()"));
+	helper.AppendFunc(wxT("Find"), 2, wxT("Find(value : any, column : string)"));
+	helper.AppendFunc(wxT("Delete"), 1, wxT("Delete(row : tableRow)"));
+	helper.AppendFunc(wxT("Clear"), wxT("Clear()"));
+	helper.AppendFunc(wxT("Sort"), 2, wxT("Sort(column : string, ascending = true : boolean)"));
 
-	m_methodHelper.AppendFunc(wxT("Add"), wxT("Add()"));
-	m_methodHelper.AppendFunc(wxT("Clone"), wxT("Clone()"));
-	m_methodHelper.AppendFunc(wxT("Count"), wxT("Count()"));
-	m_methodHelper.AppendFunc(wxT("Find"), 2, wxT("Find(value : any, column : string)"));
-	m_methodHelper.AppendFunc(wxT("Delete"), 1, wxT("Delete(row : tableRow)"));
-	m_methodHelper.AppendFunc(wxT("Clear"), wxT("Clear()"));
-	m_methodHelper.AppendFunc(wxT("Sort"), 2, wxT("Sort(column : string, ascending = true : boolean)"));
-
-	m_methodHelper.AppendProp(wxT("Columns"));
-
-	if (m_tableColumnCollection != nullptr)
-		m_tableColumnCollection->PrepareNames();
+	helper.AppendProp(wxT("Columns"));
 }
 
 bool ibValueModelTable::GetPropVal(const long lPropNum, ibValue& pvarPropVal)
@@ -132,7 +126,7 @@ bool ibValueModelTable::GetAt(const ibValue& varKeyValue, ibValue& pvarValue)
 		ibBackendCoreException::Error(_("Array index out of bounds"));
 		return false;
 	}
-	pvarValue = ibValue::CreateAndPrepareValueRef<ibValueModelTableReturnLine>(this, GetItem(index));
+	pvarValue = new ibValueModelTableReturnLine(this, GetItem(index));
 	return true;
 }
 
@@ -140,26 +134,20 @@ bool ibValueModelTable::GetAt(const ibValue& varKeyValue, ibValue& pvarValue)
 //               ibValueModelTableColumnCollection                        //
 //////////////////////////////////////////////////////////////////////
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueModelTable::ibValueModelTableColumnCollection, ibValueModelRamTableBase::ibValueModelColumnCollection);
 
 ibValueModelTable::ibValueModelTableColumnCollection::ibValueModelTableColumnCollection(ibValueModelTable* ownerTable) : ibValueModelColumnCollection(),
-m_ownerTable(ownerTable),
-m_methodHelper(new ibValueMethodHelper())
+m_ownerTable(ownerTable)
 {
+	m_members.Bind(this, &ibValueModelTableColumnCollection::FillMembers);
 }
 
 ibValueModelTable::ibValueModelTableColumnCollection::~ibValueModelTableColumnCollection() {
-	wxDELETE(m_methodHelper);
 }
 
-//������ � �������� ��� � ���������� ��������
-//������������ ��������� ������
-void ibValueModelTable::ibValueModelTableColumnCollection::PrepareNames() const
+void ibValueModelTable::ibValueModelTableColumnCollection::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-
-	m_methodHelper->AppendFunc(wxT("AddColumn"), 4, wxT("Add(name : string, type : typeDescription, caption, width)"));
-	m_methodHelper->AppendProc(wxT("RemoveColumn"), 1, wxT("RemoveColumn(name : string)"));
+	helper.AppendFunc(wxT("AddColumn"), 4, wxT("Add(name : string, type : typeDescription, caption, width)"));
+	helper.AppendProc(wxT("RemoveColumn"), 1, wxT("RemoveColumn(name : string)"));
 }
 
 #include "valueType.h"
@@ -231,7 +219,6 @@ bool ibValueModelTable::ibValueModelTableColumnCollection::GetAt(const ibValue& 
 //               ibValueModelTableColumnInfo                              //
 //////////////////////////////////////////////////////////////////////
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueModelTable::ibValueModelTableColumnCollection::ibValueModelTableColumnInfo, ibValueModelRamTableBase::ibValueModelColumnCollection::ibValueModelColumnInfo);
 
 ibValueModelTable::ibValueModelTableColumnCollection::ibValueModelTableColumnInfo::ibValueModelTableColumnInfo() : ibValueModelColumnInfo() {
 }
@@ -241,29 +228,26 @@ ibValueModelTable::ibValueModelTableColumnCollection::ibValueModelTableColumnInf
 }
 
 ibValueModelTable::ibValueModelTableColumnCollection::ibValueModelTableColumnInfo::~ibValueModelTableColumnInfo() {
-	wxDELETE(m_methodHelper);
 }
 
 //////////////////////////////////////////////////////////////////////
 //               ibValueModelTableReturnLine                              //
 //////////////////////////////////////////////////////////////////////
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueModelTable::ibValueModelTableReturnLine, ibValueModelRamTableBase::ibValueModelReturnLine);
 
 ibValueModelTable::ibValueModelTableReturnLine::ibValueModelTableReturnLine(ibValueModelTable* ownerTable, const ibDataViewItem& line) :
-	ibValueModelReturnLine(line), m_methodHelper(new ibValueMethodHelper()), m_ownerTable(ownerTable) {
+	ibValueModelReturnLine(line), m_ownerTable(ownerTable) {
+	m_members.Bind(this, &ibValueModelTableReturnLine::FillMembers);
 }
 
 ibValueModelTable::ibValueModelTableReturnLine::~ibValueModelTableReturnLine() {
-	wxDELETE(m_methodHelper);
 }
 
-void ibValueModelTable::ibValueModelTableReturnLine::PrepareNames() const
+void ibValueModelTable::ibValueModelTableReturnLine::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
 	for (auto& colInfo : m_ownerTable->m_tableColumnCollection->m_listColumnInfo) {
 		wxASSERT(colInfo);
-		m_methodHelper->AppendProp(
+		helper.AppendProp(
 			colInfo->GetColumnName(),
 			colInfo->GetColumnID()
 		);
@@ -275,7 +259,7 @@ bool ibValueModelTable::ibValueModelTableReturnLine::SetPropVal(const long lProp
 	if (appData->DesignerMode())
 		return false;
 	return SetValueByMetaID(
-		m_methodHelper->GetPropData(lPropNum),
+		m_members.GetPropData(lPropNum),
 		varPropVal
 	);
 }
@@ -286,7 +270,7 @@ bool ibValueModelTable::ibValueModelTableReturnLine::GetPropVal(const long lProp
 		return false;
 
 	return GetValueByMetaID(
-		m_methodHelper->GetPropData(lPropNum), pvarPropVal
+		m_members.GetPropData(lPropNum), pvarPropVal
 	);
 }
 

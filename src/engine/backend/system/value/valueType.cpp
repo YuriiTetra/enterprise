@@ -8,11 +8,6 @@
 
 //////////////////////////////////////////////////////////////////////
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueType, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueQualifierNumber, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueQualifierDate, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueQualifierString, ibValue);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueTypeDescription, ibValue);
 
 //////////////////////////////////////////////////////////////////////
 
@@ -52,7 +47,7 @@ wxString ibValueType::GetString() const
 #include "backend/system/systemManager.h"
 
 ibValue ibValueTypeDescription::AdjustValue(const ibTypeDescription& typeDescription,
-	ibMetaData* metaData)
+	const ibMetaData* metaData)
 {
 	if (!typeDescription.IsOk())
 		return wxEmptyValue;
@@ -74,7 +69,7 @@ ibValue ibValueTypeDescription::AdjustValue(const ibTypeDescription& typeDescrip
 }
 
 ibValue ibValueTypeDescription::AdjustValue(const ibTypeDescription& typeDescription, const ibValue& varValue,
-	ibMetaData* metaData)
+	const ibMetaData* metaData)
 {
 	if (!typeDescription.IsOk())
 		return varValue;
@@ -139,38 +134,31 @@ ibValue ibValueTypeDescription::AdjustValue(const ibTypeDescription& typeDescrip
 //////////////////////////////////////////////////////////////////////
 
 ibValueTypeDescription::ibValueTypeDescription() :
-	ibValue(ibValueTypes::TYPE_VALUE, true), m_methodHelper(new ibValueMethodHelper())
-{
+	ibValueStaticMembers(ibValueTypes::TYPE_VALUE, true){
 }
 
 ibValueTypeDescription::ibValueTypeDescription(ibValueType* valueType) :
-	ibValue(ibValueTypes::TYPE_VALUE, true), m_typeDesc({ valueType ? valueType->GetOwnerTypeClass() : 0 }), m_methodHelper(new ibValueMethodHelper())
-{
+	ibValueStaticMembers(ibValueTypes::TYPE_VALUE, true), m_typeDesc({ valueType ? valueType->GetOwnerTypeClass() : 0 }){
 }
 
 ibValueTypeDescription::ibValueTypeDescription(ibValueType* valueType, ibValueQualifierNumber* qNumber, ibValueQualifierDate* qDate, ibValueQualifierString* qString) :
-	ibValue(ibValueTypes::TYPE_VALUE, true), m_typeDesc({ valueType ? valueType->GetOwnerTypeClass() : 0 }, (qNumber ? *qNumber : ibQualifierNumber()), (qDate ? *qDate : ibQualifierDate()), (qString ? *qString : ibQualifierString())), m_methodHelper(new ibValueMethodHelper())
-{
+	ibValueStaticMembers(ibValueTypes::TYPE_VALUE, true), m_typeDesc({ valueType ? valueType->GetOwnerTypeClass() : 0 }, (qNumber ? *qNumber : ibQualifierNumber()), (qDate ? *qDate : ibQualifierDate()), (qString ? *qString : ibQualifierString())){
 }
 
 ibValueTypeDescription::ibValueTypeDescription(const ibTypeDescription& typeDescription)
-	: ibValue(ibValueTypes::TYPE_VALUE, true), m_typeDesc(typeDescription), m_methodHelper(new ibValueMethodHelper())
-{
+	: ibValueStaticMembers(ibValueTypes::TYPE_VALUE, true), m_typeDesc(typeDescription){
 }
 
 ibValueTypeDescription::ibValueTypeDescription(const std::vector<ibClassID>& array) :
-	ibValue(ibValueTypes::TYPE_VALUE, true), m_typeDesc(array), m_methodHelper(new ibValueMethodHelper())
-{
+	ibValueStaticMembers(ibValueTypes::TYPE_VALUE, true), m_typeDesc(array){
 }
 
 ibValueTypeDescription::ibValueTypeDescription(const std::vector<ibClassID>& array, ibValueQualifierNumber* qNumber, ibValueQualifierDate* qDate, ibValueQualifierString* qString) :
-	ibValue(ibValueTypes::TYPE_VALUE, true), m_typeDesc(array, (qNumber ? *qNumber : ibQualifierNumber()), (qDate ? *qDate : ibQualifierDate()), (qString ? *qString : ibQualifierString())), m_methodHelper(new ibValueMethodHelper())
-{
+	ibValueStaticMembers(ibValueTypes::TYPE_VALUE, true), m_typeDesc(array, (qNumber ? *qNumber : ibQualifierNumber()), (qDate ? *qDate : ibQualifierDate()), (qString ? *qString : ibQualifierString())){
 }
 
 ibValueTypeDescription::~ibValueTypeDescription()
 {
-	wxDELETE(m_methodHelper);
 }
 
 bool ibValueTypeDescription::Init(ibValue** paParams, const long lSizeArray)
@@ -262,9 +250,9 @@ ibValue ibValueTypeDescription::AdjustValue(const ibValue& varValue) const
 
 ibValue ibValueTypeDescription::Types() const
 {
-	ibValueArray* arr = ibValue::CreateAndPrepareValueRef<ibValueArray>();
+	ibValueArray* arr = new ibValueArray();
 	for (auto clsid : m_typeDesc.m_listTypeClass)
-		arr->Add(ibValue::CreateAndPrepareValueRef<ibValueType>(clsid));
+		arr->Add(new ibValueType(clsid));
 	return arr;
 }
 
@@ -274,16 +262,21 @@ enum Func {
 	enTypes
 };
 
-void ibValueTypeDescription::PrepareNames() const
+// Bound contributor (push). Build() Clear()s before running this, so no
+// ClearHelper() here. Type-invariant — ctx unused.
+void ibValueTypeDescription_BindNames(ibValue::ibMemberTable& helper, const ibValue* /*ctx*/)
 {
-	m_methodHelper->ClearHelper();
+	helper.AppendConstructor(4, wxT("typeDescription(type, qNumber, qDate, qString)"));
 
-	m_methodHelper->AppendConstructor(4, wxT("typeDescription(type, qNumber, qDate, qString)"));
-
-	m_methodHelper->AppendFunc(wxT("ContainType"), 1, wxT("containsType(type : type)"));
-	m_methodHelper->AppendFunc(wxT("AdjustValue"), 1, wxT("AdjustValue(value = undefined : any"));
-	m_methodHelper->AppendFunc(wxT("Types"), wxT("Types()"));
+	helper.AppendFunc(wxT("ContainType"), 1, wxT("containsType(type : type)"));
+	helper.AppendFunc(wxT("AdjustValue"), 1, wxT("AdjustValue(value = undefined : any"));
+	helper.AppendFunc(wxT("Types"), wxT("Types()"));
 }
+
+// Population moved to the bound contributor (BindTypeDescNames), built lazily
+// on first GetPMethods()/EnsureBuilt(). Kept as an empty override so the
+// factory's post-construction PrepareNames() call is a no-op and the build is
+// deferred to first access (per-instance helper -> thread-safe lazy build).
 
 bool ibValueTypeDescription::CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray)
 {

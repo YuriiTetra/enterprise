@@ -12,6 +12,10 @@
 #include "backend/actionInfo.h"
 #include "backend/srcObject.h"
 
+// L3 Selector tree (folded from a flat snapshot) — mirrored into the RAM tree model by
+// ibValueModelRamTreeBase::PopulateFromTree. Full type only needed in tableInfo.cpp.
+class ibSelectorTree;
+
 ///////////////////////////////////////////////////////////////////////////////////
 #define defaultCountPerPage 100
 ///////////////////////////////////////////////////////////////////////////////////
@@ -81,9 +85,9 @@ protected:
 };
 
 //Common entity for tables, list, table trees 
-class BACKEND_API ibValueModel : public ibValue,
+class BACKEND_API ibValueModel : public ibValueDynamicMembers,
 	public ibActionDataObject, public ibTabularObject {
-	wxDECLARE_ABSTRACT_CLASS(ibValueModel);
+	public:
 
 	template <typename T>
 	class ibVariantDataValueImpl :
@@ -212,9 +216,9 @@ protected:
 			return m_ownerModel->HasContainerColumns(item);
 		}
 
-		virtual unsigned int GetChildren(const ibDataViewItem& item, ibDataViewItemArray& children) const {
-			return m_ownerModel->GetChildren(item, children);
-		}
+		// GetFirstFetch delegate lives further down with its Next/Prev
+		// siblings — keep all three forwarders together so the paged
+		// contract reads as one block.
 
 		// default compare function
 		virtual int Compare(const ibDataViewItem& item1, const ibDataViewItem& item2,
@@ -310,12 +314,10 @@ protected:
 
 public:
 
-	class BACKEND_API ibValueModelColumnCollection : public ibValue {
-		wxDECLARE_ABSTRACT_CLASS(ibValueModelColumnCollection);
+	class BACKEND_API ibValueModelColumnCollection : public ibValueDynamicMembers {
 	public:
-		class ibValueModelColumnInfo : public ibValue {
-			wxDECLARE_ABSTRACT_CLASS(ibValueModelColumnInfo);
-		public:
+		class ibValueModelColumnInfo : public ibValueDynamicMembers {
+	public:
 
 			virtual unsigned int GetColumnID() const = 0;
 			virtual void SetColumnID(unsigned int col) {}
@@ -336,16 +338,8 @@ public:
 			ibValueModelColumnInfo();
 			virtual ~ibValueModelColumnInfo();
 
-			virtual ibValueMethodHelper* GetPMethods() const {
-				//PrepareNames();
-				return m_methodHelper;
-			}
-
-			virtual void PrepareNames() const;
+			void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 			virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal);
-
-		protected:
-			ibValueMethodHelper* m_methodHelper;
 		};
 	public:
 
@@ -367,7 +361,7 @@ public:
 		virtual ibValueModelColumnInfo* GetColumnInfo(unsigned int idx) const = 0;
 		virtual unsigned int GetColumnCount() const = 0;
 
-		ibValueModelColumnCollection() : ibValue(ibValueTypes::TYPE_VALUE, true) {}
+		ibValueModelColumnCollection() : ibValueDynamicMembers(ibValueTypes::TYPE_VALUE, true) {}
 		virtual ~ibValueModelColumnCollection() {}
 
 		//Working with iterators
@@ -393,13 +387,12 @@ public:
 		}
 	};
 
-	class BACKEND_API ibValueModelReturnLine : public ibValue {
-		wxDECLARE_ABSTRACT_CLASS(ibValueModelReturnLine);
+	class BACKEND_API ibValueModelReturnLine : public ibValueDynamicMembers {
 	public:
 
 		ibDataViewItem GetLineItem() const { return m_lineItem; };
 
-		ibValueModelReturnLine(const ibDataViewItem& lineItem) : ibValue(ibValueTypes::TYPE_VALUE, true), m_lineItem(lineItem) {
+		ibValueModelReturnLine(const ibDataViewItem& lineItem) : ibValueDynamicMembers(ibValueTypes::TYPE_VALUE, true), m_lineItem(lineItem) {
 			wxRefCounter* refCounter = static_cast<wxRefCounter*>(m_lineItem.GetID());
 			if (refCounter != nullptr)
 				refCounter->IncRef();
@@ -541,6 +534,7 @@ public:
 	// through this single path; legacy CallRefreshModel / RefreshModel
 	// are gone.
 	void RefetchAll() {
+		BumpViewGeneration();   // filter change / explicit refetch -> the RAM visible-view rebuilds
 		if (m_modelProvider != nullptr) {
 			m_modelProvider->BeforeReset();
 			m_modelProvider->AfterReset();
@@ -559,6 +553,7 @@ public:
 			sd->m_sortAscending = ascending;
 			sd->m_sortEnable    = true;
 		}
+		BumpViewGeneration();   // sort change -> the RAM visible-view rebuilds
 		if (m_modelProvider != nullptr) {
 			m_modelProvider->BeforeReset();
 			m_modelProvider->AfterReset();
@@ -742,7 +737,11 @@ public:
 
 	// Is the container just a header or an item with all columns
 	virtual bool HasContainerColumns(const ibDataViewItem& item) const { return false; }
-	virtual unsigned int GetChildren(const ibDataViewItem& item, ibDataViewItemArray& children) const = 0;
+
+	// GetChildren removed — concretes implement GetFirstFetch (and
+	// GetNextFetch / GetPrevFetch when paged). Old non-paged sources
+	// just return the whole batch from GetFirstFetch and leave Next /
+	// Prev as base-default no-ops.
 
 	// default compare function
 	virtual int Compare(const ibDataViewItem& item1, const ibDataViewItem& item2,
@@ -760,12 +759,19 @@ protected:
 
 	ibFilterRow m_filterRow;
 	ibSortOrder m_sortOrder;
+
+	// Monotonic change counter — bumped on any filter / sort / value / row mutation the model
+	// notifies the GUI of. The RAM visible-view cache (ibValueModelRamTableBase::BuildVisibleView)
+	// stamps the generation it built at and rebuilds only on a mismatch — so the cache is NEVER
+	// staler than the control (it invalidates exactly where the GUI is told the view changed).
+	// (docs/paging-design.md — BuildVisibleView caching)
+	uint32_t m_viewGeneration = 0;
+	void     BumpViewGeneration() { ++m_viewGeneration; }
 };
 
 //Table support
 class BACKEND_API ibValueModelTableBase : public ibValueModel {
-	wxDECLARE_ABSTRACT_CLASS(ibValueModelTableBase);
-public:
+	public:
 
 	struct ibValueTableRow : public ibDataViewObject {
 
@@ -801,7 +807,7 @@ public:
 
 		/////////////////////////////////////////////////////////////////////////////
 
-		const ibMetaValueArray& GetTableValues() const { return m_nodeValues; }
+		const ibRowMetaValues& GetTableValues() const { return m_nodeValues; }
 
 		/////////////////////////////////////////////////////////////////////////////
 
@@ -936,7 +942,7 @@ public:
 		friend class ibValueModelRamTableBase;
 	protected:
 		ibValueModelTableBase* m_valueTable;
-		ibMetaValueArray m_nodeValues;
+		ibRowMetaValues m_nodeValues;
 	};
 
 public:
@@ -959,10 +965,12 @@ public:
 	// hook from anywhere a row mutation happens (Set / write-through
 	// from script).  No storage dependency, lives on the base.
 	void RowChanged(ibValueTableRow* item) {
+		BumpViewGeneration();   // a row's values changed -> the filtered/sorted view may differ
 		m_modelProvider->ItemChanged(ibDataViewItem(item));
 	}
 
 	void RowValueChanged(ibValueTableRow* item, unsigned int col) {
+		BumpViewGeneration();   // a cell changed -> filter membership / sort order may differ
 		m_modelProvider->ValueChanged(ibDataViewItem(item), col);
 	}
 
@@ -1008,15 +1016,9 @@ public:
 		return IsEnabledByRow(item, col);
 	}
 
-	// Children query — DB-backed concrete classes pull rows via
-	// Get*Fetch and don't expose a full-table GetChildren walk;
-	// RAM-backed (ibValueModelRamTableBase) overrides to walk
-	// m_nodeValues.  Default returns 0 here so the base remains
-	// instantiable abstract for non-RAM concretes.
-	virtual unsigned int GetChildren(const ibDataViewItem& WXUNUSED(parent),
-		ibDataViewItemArray& WXUNUSED(array)) const override {
-		return 0;
-	}
+	// Children query: DB-backed concretes pull rows via Get*Fetch;
+	// the base default returns 0 (inherited from ibValueModel), so
+	// no override is needed here for the non-RAM tier.
 
 	// implement some base class pure virtual directly
 	virtual ibDataViewItem GetParent(const ibDataViewItem& WXUNUSED(item)) const override {
@@ -1096,7 +1098,7 @@ public:
 // (Catalog list, Enum, Register) inherit directly from
 // ibValueModelTableBase and don't see the storage at all.
 class BACKEND_API ibValueModelRamTableBase : public ibValueModelTableBase {
-	wxDECLARE_ABSTRACT_CLASS(ibValueModelRamTableBase);
+	public:
 
 public:
 
@@ -1121,6 +1123,7 @@ public:
 
 	void Clear(bool notify = true) {
 		if (m_nodeValues.empty()) return;
+		BumpViewGeneration();   // rows gone -> the cached view (now dangling pointers) must rebuild
 		if (notify) m_modelProvider->BeforeReset();
 		m_nodeValues.erase(std::remove_if(m_nodeValues.begin(), m_nodeValues.end(),
 			[](const auto& node) { node->m_valueTable = nullptr; node->DecRef(); return true; }),
@@ -1132,6 +1135,7 @@ public:
 	// from the model. Used after batch mutations that wxDVC's
 	// incremental sort tracking can't follow (paged backward Insert).
 	void NotifyReset() {
+		BumpViewGeneration();
 		if (m_modelProvider) {
 			m_modelProvider->BeforeReset();
 			m_modelProvider->AfterReset();
@@ -1142,6 +1146,7 @@ public:
 
 	void ClearRange(const unsigned long from, const unsigned long to, bool notify = true) {
 		if (from > m_nodeValues.size() || to > m_nodeValues.size()) return;
+		BumpViewGeneration();
 		for (auto iterator = m_nodeValues.begin() + from; iterator != m_nodeValues.begin() + to; iterator++) {
 			if (notify && !m_modelProvider->ItemDeleted(ibDataViewItem(nullptr), ibDataViewItem(*iterator)))
 				return;
@@ -1162,6 +1167,7 @@ public:
 	long Append(ibValueTableRow* child, bool notify = true) {
 		wxASSERT(child);
 
+		BumpViewGeneration();
 		child->m_valueTable = this;
 		m_nodeValues.emplace_back(child);
 
@@ -1177,6 +1183,7 @@ public:
 	long Insert(ibValueTableRow* child, unsigned int row, bool notify = true) {
 		wxASSERT(child);
 
+		BumpViewGeneration();
 		child->m_valueTable = this;
 		auto iterator = m_nodeValues.insert(m_nodeValues.begin() + row, child);
 
@@ -1192,6 +1199,7 @@ public:
 	bool Remove(ibValueTableRow*& child, bool notify = true) {
 		wxASSERT(child);
 
+		BumpViewGeneration();
 		auto iterator = std::find(
 			m_nodeValues.begin(),
 			m_nodeValues.end(), child
@@ -1215,6 +1223,7 @@ public:
 	}
 
 	void Sort(std::vector<ibSortModel>& paSort, bool notify = true) {
+		BumpViewGeneration();   // m_nodeValues reordered -> the cached view order is stale
 		if (notify) m_modelProvider->BeforeReset();
 		std::sort(m_nodeValues.begin(), m_nodeValues.end(),
 			[&paSort](const ibValueTableRow* a, const ibValueTableRow* b)
@@ -1252,41 +1261,10 @@ public:
 		return ibDataViewItem(nullptr);
 	}
 
-	virtual unsigned int GetChildren(const ibDataViewItem& parent, ibDataViewItemArray& array) const override {
-		if (parent.IsOk())
-			return 0;
-		// Mirror BuildVisibleView's filter+sort so narrow ItemInserted /
-		// ValueChanged paths in the control (which probe GetChildren
-		// for insertion position) see the same row order Get*Fetch
-		// returns — otherwise the tree node lands at the m_nodeValues
-		// index instead of the view index, which mismatches the
-		// fetched buffer.
-		auto view = BuildVisibleView();
-		unsigned int count = static_cast<unsigned int>(view.size());
-		if (count == 0)
-			return 0;
-		array.Alloc(count);
-		for (auto* node : view) {
-			array.Add(ibDataViewItem(node));
-		}
-		return count;
-	}
-
-	// Legacy unfiltered/unsorted counterpart kept private for the
-	// rare call site that needs the raw vector — currently none
-	// outside this class.
-	unsigned int GetChildrenRaw(const ibDataViewItem& parent, ibDataViewItemArray& array) const {
-		if (parent.IsOk())
-			return 0;
-		unsigned int count = static_cast<unsigned int>(m_nodeValues.size());
-		if (count == 0)
-			return 0;
-		array.Alloc(count);
-		for (auto& node : m_nodeValues) {
-			array.Add(ibDataViewItem(node));
-		}
-		return count;
-	}
+	// Note: the universal GetFirstFetch override is further down in
+	// this class (it handles both the paged and full-batch cases by
+	// inspecting `count`); the migration from the legacy GetChildren
+	// API folded the old single-shot path into that one impl.
 
 	// Build a filtered + sorted view of m_nodeValues.  Filter comes
 	// from m_filterRow (eFilter / eFilterByColumn / eFilterClear UI
@@ -1295,6 +1273,12 @@ public:
 	// (typically << 1000 rows) so building the view per-fetch is
 	// cheap; cache + invalidation isn't worth the complexity.
 	std::vector<ibValueTableRow*> BuildVisibleView() const {
+		// Unchanged since the last build (no filter / sort / value / row mutation) -> reuse the
+		// cached view, skipping the per-row filter scan + the stable_sort. Invalidated by the
+		// generation counter, bumped on every change the model notifies the GUI of.
+		if (m_visibleViewGen == m_viewGeneration)
+			return m_visibleViewCache;
+
 		std::vector<ibValueTableRow*> view;
 		view.reserve(m_nodeValues.size());
 		ibValue scratch;
@@ -1329,6 +1313,8 @@ public:
 					return false;
 				});
 		}
+		m_visibleViewCache = view;          // stamp + cache; reused until the next change bumps m_viewGeneration
+		m_visibleViewGen   = m_viewGeneration;
 		return view;
 	}
 
@@ -1398,11 +1384,17 @@ public:
 
 protected:
 	std::vector<ibValueTableRow*> m_nodeValues;
+
+	// BuildVisibleView cache (docs/paging-design.md): the last filtered+sorted view + the
+	// generation it was built at. Mutable — BuildVisibleView is const but memoises. Initialised to
+	// a generation that can never match m_viewGeneration (0), so the first call always builds.
+	mutable std::vector<ibValueTableRow*> m_visibleViewCache;
+	mutable uint32_t                      m_visibleViewGen = static_cast<uint32_t>(-1);
 };
 
 //Tree support
 class BACKEND_API ibValueModelTreeBase : public ibValueModel {
-	wxDECLARE_ABSTRACT_CLASS(ibValueModelTableBase);
+	public:
 
 
 	struct ibValueTreeNode : public ibDataViewObject {
@@ -1448,7 +1440,7 @@ class BACKEND_API ibValueModelTreeBase : public ibValueModel {
 
 		/////////////////////////////////////////////////////////////////////////////
 
-		const ibMetaValueArray& GetTableValues() const { return m_nodeValues; }
+		const ibRowMetaValues& GetTableValues() const { return m_nodeValues; }
 
 		/////////////////////////////////////////////////////////////////////////////
 
@@ -1473,6 +1465,19 @@ class BACKEND_API ibValueModelTreeBase : public ibValueModel {
 				return false;
 			}
 			return true;
+		}
+
+		// Bulk-build helper: attach a fresh child node WITHOUT a per-node
+		// ItemAppended notification (the caller fires ONE reset after the whole
+		// tree is in place) and WITH the parent link set — plain Append leaves
+		// m_parent null, which would break upward navigation. Used by
+		// ibValueModelRamTreeBase::PopulateFromTree to mirror an L3
+		// ibQueryRamTable Node tree in one shot. (docs/query-language-arc.md §22.1b)
+		ibValueTreeNode* AddChildNode() {
+			ibValueTreeNode* child = new ibValueTreeNode(m_valueTree);
+			child->m_parent = this;
+			m_children.emplace_back(child);
+			return child;
 		}
 
 		bool Insert(ibValueTreeNode* child, unsigned int n, bool notify = true) {
@@ -1606,7 +1611,7 @@ class BACKEND_API ibValueModelTreeBase : public ibValueModel {
 		std::vector<ibValueTreeNode*> m_children;
 	protected:
 		ibValueModelTreeBase* m_valueTree;
-		ibMetaValueArray m_nodeValues;
+		ibRowMetaValues m_nodeValues;
 	};
 
 public:
@@ -1698,12 +1703,10 @@ public:
 		return node->IsContainer();
 	}
 
-	// Paged path uses Get*Fetch directly; the wx-style GetChildren
-	// walker only feeds the in-memory tree consumer (Ram-tree-base
-	// override).  Default returns the children stored on the node
-	// itself when one is supplied; null parent has no fallback root
-	// here.
-	virtual unsigned int GetChildren(const ibDataViewItem& parent,
+	// Default returns the children stored on the node itself when
+	// one is supplied; null parent has no fallback root here.
+	virtual unsigned int GetFirstFetch(const ibDataViewItem& parent,
+		const ibDataViewItem& /*anchor*/, int /*count*/,
 		ibDataViewItemArray& array) const override {
 		ibValueTreeNode* node = GetViewData<ibValueTreeNode>(parent);
 		if (node == nullptr)
@@ -1781,7 +1784,7 @@ public:
 // so DB-cursor concretes (FolderRef) inherit only the Get*Fetch and
 // notification primitives without paying for the m_root allocation.
 class BACKEND_API ibValueModelRamTreeBase : public ibValueModelTreeBase {
-	wxDECLARE_ABSTRACT_CLASS(ibValueModelRamTreeBase);
+	public:
 
 public:
 
@@ -1811,6 +1814,14 @@ public:
 	/////////////////////////////////////////////////////////
 
 	ibValueTreeNode* GetRoot() const { return m_root; }
+
+	// Mirror an L3 Selector tree (ibSelectorTree, folded from a flat snapshot — Execute() +
+	// ibSelector::Build) into this RAM tree in ONE shot: each Node -> an ibValueTreeNode carrying
+	// that Node's cell values, nested the same way. This is the EAGER backing — the Selector
+	// already produced the whole shape from one snapshot, so the per-parent fetch is replaced by a
+	// single tree mirror + one reset. Defined in tableInfo.cpp (needs the full ibSelectorTree).
+	// (docs/query-language-arc.md §22.1b)
+	void PopulateFromTree(const ibSelectorTree& tree, bool notify = true);
 
 	// helper methods to change the model
 	bool Delete(const ibDataViewItem& item, bool notify = true) {
@@ -1943,16 +1954,9 @@ public:
 
 	/////////////////////////////////////////////////////////
 
-	// Null-parent fallback to the invisible root — reproduces the
-	// pre-split behaviour for callers that pass an empty item to
-	// mean "top of the tree".
-	virtual unsigned int GetChildren(const ibDataViewItem& parent,
-		ibDataViewItemArray& array) const override {
-		ibValueTreeNode* node = GetViewData<ibValueTreeNode>(parent);
-		if (node == nullptr)
-			return ibValueModelTreeBase::GetChildren(ibDataViewItem(m_root), array);
-		return ibValueModelTreeBase::GetChildren(parent, array);
-	}
+	// Null-parent fallback is handled by the paged GetFirstFetch
+	// override above — that one routes an empty parent to m_root's
+	// children. No separate non-paged single-shot override here.
 
 	// GetParent stops at the invisible root: a node whose parent is
 	// m_root reports no parent (it sits at the top level).

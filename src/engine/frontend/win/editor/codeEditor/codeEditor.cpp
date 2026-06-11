@@ -10,6 +10,8 @@
 #include "frontend/docView/docView.h"
 #include "res/bitmaps_res.h"
 
+#include <wx/artprov.h>
+
 #define DEF_LINENUMBER_ID 0
 #define DEF_BREAKPOINT_ID 1
 #define DEF_FOLDING_ID 2
@@ -116,6 +118,35 @@ ibCodeEditor::ibCodeEditor(ibMetaDocument* document, wxWindow* parent, wxWindowI
 	StyleSetForeground(wxSTC_STYLE_BRACEBAD, *wxRED);
 
 	Bind(wxEVT_STC_UPDATEUI, &ibCodeEditor::OnUpdateUI, this);
+
+	// Custom context menu — replaces wxSTC's built-in popup with one
+	// that adds the Syntax Helper Look-Up item alongside the standard
+	// edit actions. The Look-Up item posts wxID_FRONTEND_SYNTAX_HELPER_LOOKUP
+	// upward through the parent chain so the host frame
+	// (mainFrameDesigner's OpenHelpForCursor binding) handles it without
+	// the editor depending on the downstream designer header. See
+	// subphase 1.3 — codeEditor knows nothing about the help corpus.
+	UsePopUp(wxSTC_POPUP_NEVER);
+	Bind(wxEVT_CONTEXT_MENU, &ibCodeEditor::OnContextMenu, this);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { Cut();        }, wxID_CUT);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { Copy();       }, wxID_COPY);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { Paste();      }, wxID_PASTE);
+	Bind(wxEVT_MENU, [this](wxCommandEvent&) { SelectAll();  }, wxID_SELECTALL);
+	Bind(wxEVT_MENU, [this](wxCommandEvent& ev) {
+		// Walk parent chain firing wxEVT_MENU at every wxWindow until
+		// one handles. wxStyledTextCtrl's PopupMenu does not always
+		// propagate through wxAUI / wxAuiDocMDIFrame parents to the
+		// outermost host where the host Bind() lives.
+		wxCommandEvent up(wxEVT_MENU, wxID_FRONTEND_SYNTAX_HELPER_LOOKUP);
+		up.SetEventObject(this);
+		for (wxWindow* p = GetParent(); p != nullptr; p = p->GetParent()) {
+			if (p->ProcessWindowEvent(up)) return;
+		}
+		if (wxTheApp) {
+			if (wxWindow* top = wxTheApp->GetTopWindow())
+				top->ProcessWindowEvent(up);
+		}
+	}, wxID_FRONTEND_SYNTAX_HELPER_LOOKUP);
 
 	// Setup the dwell time before a tooltip is displayed.
 	SetMouseDwellTime(200);
@@ -598,6 +629,7 @@ void ibCodeEditor::HighlightSyntaxAndCalculateFoldLevel(const int fromPos, const
 
 	wxString word;
 	unsigned int currPos = fromPos;
+	bool prevWasDot = false;   // last significant token was a member-access '.' (kept across whitespace)
 
 	while (!m_tc.IsEnd()) {
 #ifdef UTF8_LEXEM_TRANSLATE
@@ -608,7 +640,9 @@ void ibCodeEditor::HighlightSyntaxAndCalculateFoldLevel(const int fromPos, const
 		if (m_tc.IsWord()) {
 			(void)m_tc.GetWord(word, false, true);
 			const short keyWord = ibTranslateCode::IsKeyWord(word);
-			if (keyWord != wxNOT_FOUND) {
+			// A keyword right after a member-access `.` is a MEMBER NAME, not a keyword
+			// (`q.Execute().Select()` — `Select` is the method): style it as a plain identifier.
+			if (keyWord != wxNOT_FOUND && !prevWasDot) {
 				if (word.Left(1) == '#') {
 					appendStyle(wxSTC_C_PREPROCESSOR);
 				}
@@ -619,6 +653,7 @@ void ibCodeEditor::HighlightSyntaxAndCalculateFoldLevel(const int fromPos, const
 			else {
 				appendStyle(wxSTC_C_WORD);
 			}
+			prevWasDot = false;
 		}
 		else if (m_tc.IsNumber() || m_tc.IsString() || m_tc.IsDate()) {
 			if (m_tc.IsNumber()) {
@@ -633,10 +668,15 @@ void ibCodeEditor::HighlightSyntaxAndCalculateFoldLevel(const int fromPos, const
 				(void)m_tc.GetDate();
 				appendStyle(wxSTC_C_OPERATOR);
 			}
+			prevWasDot = false;
 		}
 		else {
-			(void)m_tc.GetByte();
+			wxUniChar b;
+			(void)m_tc.GetByte(b);
 			appendStyle(wxSTC_C_IDENTIFIER);
+			// keep "after dot" across intervening whitespace, so `obj . Select` is handled too
+			if (b == '.')                                             prevWasDot = true;
+			else if (b != ' ' && b != '\t' && b != '\r' && b != '\n') prevWasDot = false;
 		}
 	}
 
@@ -881,4 +921,63 @@ void ibCodeEditor::OnKeyDown(wxKeyEvent& event)
 		break;
 	default: event.Skip(); break;
 	}
+}
+
+wxString ibCodeEditor::GetIdentifierUnderCursor()
+{
+	// Explicit selection wins — user may have selected a multi-word
+	// expression that the autocomplete word-boundary heuristic cannot
+	// see. Callers that want strict identifier-only semantics should
+	// validate the returned string themselves.
+	const wxString sel = GetSelectedText();
+	if (!sel.IsEmpty()) return sel;
+
+	const int pos   = GetCurrentPos();
+	const int start = WordStartPosition(pos, true);
+	const int end   = WordEndPosition  (pos, true);
+	if (end <= start) return wxEmptyString;
+	return GetTextRange(start, end);
+}
+
+#include "frontend/mainFrame/mainFrame.h"  // wxID_FRONTEND_SYNTAX_HELPER_LOOKUP
+
+void ibCodeEditor::OnContextMenu(wxContextMenuEvent& event)
+{
+	wxMenu menu;
+
+	// Syntax helper lookup goes first — primary action for an
+	// identifier-aware editor. Disabled when the cursor isn't over
+	// an identifier (whitespace, between tokens).
+	const wxString identifier = GetIdentifierUnderCursor();
+	auto* miLookup = menu.Append(wxID_FRONTEND_SYNTAX_HELPER_LOOKUP,
+	                             _("Look up in Syntax Helper") + wxT("\tRawCtrl+F1"));
+	miLookup->SetBitmap(wxArtProvider::GetBitmap(wxART_HELP_BOOK, wxART_MENU));
+	miLookup->Enable(!identifier.IsEmpty());
+
+	menu.AppendSeparator();
+
+	// Standard clipboard primitives.
+	auto* miCut       = menu.Append(wxID_CUT,       _("Cut")        + wxT("\tCtrl+X"));
+	auto* miCopy      = menu.Append(wxID_COPY,      _("Copy")       + wxT("\tCtrl+C"));
+	auto* miPaste     = menu.Append(wxID_PASTE,     _("Paste")      + wxT("\tCtrl+V"));
+	auto* miSelectAll = menu.Append(wxID_SELECTALL, _("Select all") + wxT("\tCtrl+A"));
+
+	miCut  ->SetBitmap(wxArtProvider::GetBitmap(wxART_CUT,   wxART_MENU));
+	miCopy ->SetBitmap(wxArtProvider::GetBitmap(wxART_COPY,  wxART_MENU));
+	miPaste->SetBitmap(wxArtProvider::GetBitmap(wxART_PASTE, wxART_MENU));
+	// Select All — no canonical wxArt id; left unset so the row aligns
+	// with the icon column without a placeholder.
+	(void)miSelectAll;
+
+	miCut  ->Enable(GetSelectionStart() != GetSelectionEnd() && IsEditable());
+	miCopy ->Enable(GetSelectionStart() != GetSelectionEnd());
+	miPaste->Enable(CanPaste());
+
+	wxPoint pt = event.GetPosition();
+	if (pt == wxDefaultPosition) {
+		// Keyboard-triggered (Shift+F10 / Menu key) — anchor at caret.
+		const int pos = GetCurrentPos();
+		pt = ClientToScreen(wxPoint(PointFromPosition(pos).x, PointFromPosition(pos).y));
+	}
+	PopupMenu(&menu, ScreenToClient(pt));
 }

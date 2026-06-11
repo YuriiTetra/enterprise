@@ -1,4 +1,4 @@
-﻿#ifndef __FORM_VALUE_H__
+#ifndef __FORM_VALUE_H__
 #define __FORM_VALUE_H__
 
 #include "frontend/visualView/ctrl/control.h"
@@ -30,15 +30,19 @@ const ibClassID g_controlFormCLSID = string_to_clsid("CT_FRME");
 //********************************************************************************************
 
 class FRONTEND_API ibValueForm :
-	public ibBackendValueForm, public ibValueFrame, public ibRuntimeModuleDataObject
+	// ibValueFrame FIRST: it carries the ibValue/ibValueDynamicMembers sub-object, so
+	// putting it at offset 0 keeps ibValue at the form's offset 0 — member-pmf binds
+	// (m_members.Bind(this, &ibValueForm::FillFormMembers)) then need no MI
+	// this-adjustment, which the cast to void(ibValue::*) would otherwise drop.
+	public ibValueFrame, public ibBackendValueForm, public ibRuntimeModuleDataObject
 {
-	wxDECLARE_DYNAMIC_CLASS(ibValueForm);
+	public:
 
 private:
 
 	enum {
 		eSystem = eSizerItem + 1,
-		eProcUnit,
+		eProcUnit = g_aliasExport,   // module exports go through the descriptor autobind
 		eAttribute
 	};
 
@@ -51,6 +55,24 @@ public:
 
 	void SetCaption(const wxString& caption) { return m_propertyTitle->SetValue(caption); }
 	wxString GetCaption() const { return m_propertyTitle->GetValueAsTranslateString(); }
+
+	// Soft-lock state. m_lockBadgeHolder holds the blocking user's name
+	// when TryAcquireFormLock conflicted on open; empty means the form
+	// is editable normally. UI consumers (future lock-icon overlay /
+	// status bar) read GetLockBadgeHolder to decide whether to render
+	// the badge - title decoration was tried and rolled back as too
+	// noisy (titles in OES are already long with code + description).
+	//
+	// RefreshLockBadge: re-attempt acquire and flip badge accordingly.
+	// On success - clear badge (we now hold the lock, form editable).
+	// On persistent conflict - update holder if it changed. Called
+	// from UpdateForm so cross-user notifier ticks naturally refresh
+	// lock state alongside data state; explicit callers (focus / poll
+	// timer) may invoke directly too. Safe no-op when not in soft-
+	// lock state.
+	void SetLockBadge(const wxString& holderName) { m_lockBadgeHolder = holderName; }
+	const wxString& GetLockBadgeHolder() const { return m_lockBadgeHolder; }
+	void RefreshLockBadge();
 
 	wxColour GetForegroundColour() const { return m_propertyFG->GetValueAsColour(); }
 	wxColour GetBackgroundColour() const { return m_propertyBG->GetValueAsColour(); }
@@ -74,20 +96,20 @@ public:
 
 	template <typename retType>
 	inline retType* NewObject(const ibClassID& clsid, ibValueFrame* parentControl = nullptr, const ibValue& generateId = true) {
-		return wxDynamicCast(
-			NewObject(clsid, parentControl, generateId), retType);
+		return dynamic_cast<retType*>(
+			NewObject(clsid, parentControl, generateId));
 	}
 
 	template <typename retType>
 	inline retType* NewObject(const wxString& className, ibValueFrame* parentControl = nullptr, const ibValue& generateId = true) {
-		return wxDynamicCast(
-			NewObject(className, parentControl, generateId), retType);
+		return dynamic_cast<retType*>(
+			NewObject(className, parentControl, generateId));
 	}
 
 	/**
 	* Resuelve un posible conflicto de nombres.
 	* @note el objeto a comprobar debe estar insertado en proyecto, por tanto
-	*       no es válida para arboles "flotantes".
+	*       no es v�lida para arboles "flotantes".
 	*/
 	void ResolveNameConflict(ibValueFrame* control);
 
@@ -121,7 +143,12 @@ public:
 	//*                              Support methods                             *
 	//****************************************************************************
 
-	virtual void PrepareNames() const;
+	// The form's OWN members, ADDED on top of ibValueFrame::FillMembers (properties +
+	// Events from the base bind); module exports follow as the helper's tail
+	// (descriptor autobind). Bound in the ctor (was PrepareNames). The member-pmf bind
+	// is lossless here because ibValueFrame is ibValueForm's FIRST base, so the ibValue
+	// sub-object is at offset 0 (no MI this-adjustment to lose in the pmf cast).
+	void FillFormMembers(ibMemberTable& helper) const;
 
 	virtual bool CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray);
 	virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);
@@ -142,7 +169,7 @@ public:
 	virtual const class ibValueMetaObjectModuleBase* GetMetaForCompile() const override;
 
 	//get metaData
-	virtual ibMetaData* GetMetaData() const;
+	virtual const ibMetaData* GetMetaData() const;
 
 	virtual ibValueForm* GetImplValueRef() const override {
 		return const_cast<ibValueForm*>(this);
@@ -159,7 +186,7 @@ public:
 	ibValue GetCreatedValue() const { return m_createdValue; }
 	ibValue GetChangedValue() const { return m_changedValue; }
 
-	// One-shot consume — read and reset.  NotifyCreate/NotifyChange set
+	// One-shot consume - read and reset.  NotifyCreate/NotifyChange set
 	// these to drive position-to-new on the next UpdateForm.  Without
 	// clearing, every subsequent UpdateForm (manual Refresh, sort, idle
 	// reset) sees the same value and re-positions, bouncing the user's
@@ -200,19 +227,14 @@ public:
 
 public:
 
-	class ibValueFormCollectionControl : public ibValue {
-		wxDECLARE_DYNAMIC_CLASS(ibValueFormCollectionControl);
+	class ibValueFormCollectionControl : public ibValueDynamicMembers {
 	public:
 		ibValueFormCollectionControl();
 		ibValueFormCollectionControl(ibValueForm* ownerFrame);
 		virtual ~ibValueFormCollectionControl();
 
-		virtual ibValueMethodHelper* GetPMethods() const {  // get a reference to the class helper for parsing attribute and method names
-			//PrepareNames(); 
-			return m_methodHelper;
-		}
-
-		virtual void PrepareNames() const;
+		// DoGetPMethods (protected) + by-value m_members come from ibValueDynamicMembers.
+		void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 		virtual bool CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray);
 		virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);
@@ -220,21 +242,26 @@ public:
 		virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal); //attribute value
 		virtual bool GetAt(const ibValue& varKeyValue, ibValue& pvarValue);
 
-		//Расширенные методы:
+		//??????????? ??????:
 		bool Property(const ibValue& varKeyValue, ibValue& cValueFound);
-		unsigned int Count() const { return m_formOwner->m_listControl.size(); }
+		unsigned int Count() const { return (unsigned int)m_formOwner->GetControlList().size(); }
 
-		//Работа с итераторами:
+		//?????? ? ???????????:
 		virtual std::shared_ptr<ibValueIteratorState> CreateIterator() override;
 	private:
 		ibValueForm* m_formOwner;
-		ibValueMethodHelper* m_methodHelper;
 	};
 
 public:
 
 	ibValueFrame* CreateControl(const wxString& classControl, ibValueFrame* control = nullptr);
 	void RemoveControl(ibValueFrame* control);
+
+	// All controls owned by this form, derived by walking the control hierarchy
+	// (m_children), skipping sizer-items. Replaces the maintained m_listControl set
+	// (whose SetOwnerForm erase-bookkeeping was a teardown hazard). Cold path -
+	// script Controls collection + design-time name-conflict; the form tree is small.
+	std::vector<ibValueControl*> GetControlList() const;
 
 public:
 
@@ -307,16 +334,14 @@ public:
 
 private:
 
-	void ClearRecursive(ibValueFrame* control);
-
 	//doc event
-	bool CreateDocForm(ibMetaDocument* docParent, bool createContext = true);
+	bool CreateDocForm(ibDocument* docParent, bool createContext = true);
 	void ActivateDocForm();
 	void ChoiceDocForm(ibValue& vSelected);
 	void RefreshDocForm();
 	bool CloseDocForm();
 
-	// Body in formObject.cpp — needs ibWebTimer complete type on web
+	// Body in formObject.cpp - needs ibWebTimer complete type on web
 	// for the wxObject* upcast (frontendTypes.h only forward-declares
 	// ibWebTimer). Inline in the header dragged web-specific includes
 	// into every desktop TU.
@@ -345,12 +370,11 @@ private:
 	ibControlFrame* m_controlOwner;
 	ibSourceDataObject* m_sourceObject;
 
-	std::set<ibValueControl*> m_listControl;
 	// ibFrontendTimer = wxTimer on desktop, ibWebTimer on web. Both
 	// inherit wxEvtHandler + produce wxTimerEvent where GetEventObject()
-	// returns the timer instance — so OnIdleHandler's lookup matches
+	// returns the timer instance - so OnIdleHandler's lookup matches
 	// uniformly across builds. shared_ptr removes the manual delete on
-	// teardown paths (form dtor, DetachIdleHandler, exception unwinds) —
+	// teardown paths (form dtor, DetachIdleHandler, exception unwinds) -
 	// same ownership flavour as m_valueForm's ibValuePtr but here we
 	// don't need intrusive refcount, std is enough.
 	std::map<wxString, std::shared_ptr<ibFrontendTimer>> m_idleHandlerArray;
@@ -364,6 +388,10 @@ private:
 	ibPropertyBoolean* m_propertyEnabled = ibPropertyObject::CreateProperty<ibPropertyBoolean>(m_categoryFrame, wxT("Enabled"), _("Enabled"), _("Enable or disable the window for user input.Note that when a parent window is disabled, all of its children are disabled as well and they are reenabled again when the parent is."), true);
 	ibPropertyCategory* m_categorySizer = ibPropertyObject::CreatePropertyCategory(wxT("Sizer"), _("Sizer"));
 	ibPropertyEnum<ibValueEnumOrient>* m_propertyOrient = ibPropertyObject::CreateProperty<ibPropertyEnum<ibValueEnumOrient>>(m_categorySizer, wxT("Orient"), _("Orient"), wxVERTICAL);
+
+	// Soft-lock badge - user name of the session that holds the lock.
+	// Empty when the form is editable; set on form-open conflict.
+	wxString m_lockBadgeHolder;
 
 	friend class ibValueControl;
 	friend class ibValueFormCollectionControl;

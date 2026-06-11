@@ -51,19 +51,18 @@ const ibClassID g_controlTableBoxColumnCLSID = string_to_clsid("CT_TBLC");
 
 class ibValueEnumTableBoxSelectionMode :
 	public ibValueEnumeration<ibDataViewSelectionMode> {
-public:
+	public:
 	ibValueEnumTableBoxSelectionMode() : ibValueEnumeration() {}
 	virtual void CreateEnumeration() {
 		AddEnumeration(ibDataViewSelectionMode::ibDataViewSelectCell, wxT("SelectCell"), _("Select cell"));
 		AddEnumeration(ibDataViewSelectionMode::ibDataViewSelectRow, wxT("SelectRow"), _("Select row"));
 	}
 private:
-	wxDECLARE_DYNAMIC_CLASS(ibValueEnumTableBoxSelectionMode);
 };
 
 class ibValueEnumTableBoxViewMode :
 	public ibValueEnumeration<ibDataViewViewMode> {
-public:
+	public:
 	ibValueEnumTableBoxViewMode() : ibValueEnumeration() {}
 	virtual void CreateEnumeration() {
 		AddEnumeration(ibDataViewViewMode::ibDataViewHierarchical, wxT("Hierarchical"), _("Hierarchical"));
@@ -71,13 +70,11 @@ public:
 		AddEnumeration(ibDataViewViewMode::ibDataViewList, wxT("List"), _("List"));
 	}
 private:
-	wxDECLARE_DYNAMIC_CLASS(ibValueEnumTableBoxViewMode);
 };
 
 class ibValueModelTableBox : public ibValueWindow,
 	public ibTypeControlFactory, public ibSourceObject {
-	wxDECLARE_DYNAMIC_CLASS(ibValueModelTableBox);
-public:
+	public:
 
 	////////////////////////////////////////////////////////////////////////////////////////
 	void SetSource(const ibMetaID& id) { m_propertySource->SetValue(id); ibValueModelTableBox::RefreshModel(true); }
@@ -113,7 +110,7 @@ public:
 	ibValueModel* GetModel() const { return m_tableModel; }
 
 	//get metaData
-	virtual ibMetaData* GetMetaData() const;
+	virtual const ibMetaData* GetMetaData() const;
 
 	//get type description 
 	virtual ibTypeDescription& GetTypeDesc() const {
@@ -121,7 +118,7 @@ public:
 	}
 
 	//methods & attributes
-	virtual void PrepareNames() const;                         // this method is automatically called to initialize attribute and method names.
+	void FillControlMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 	virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal);        //setting attribute
 	virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal);                   //attribute value
@@ -308,7 +305,7 @@ private:
 
 class ibValueModelTableBoxColumn : public ibValueControl,
 	public ibTypeControlFactory {
-	wxDECLARE_DYNAMIC_CLASS(ibValueModelTableBoxColumn);
+	public:
 protected:
 
 	bool GetChoiceForm(ibPropertyList* property);
@@ -383,7 +380,7 @@ public:
 	virtual ibValueForm* GetOwnerForm() const { return m_formOwner; }
 
 	//get metaData
-	virtual ibMetaData* GetMetaData() const;
+	virtual const ibMetaData* GetMetaData() const;
 
 	//get type description 
 	virtual ibTypeDescription& GetTypeDesc() const { return m_propertySource->GetValueAsTypeDesc(); }

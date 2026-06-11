@@ -5,17 +5,14 @@
 
 #include "metaModuleObject.h"
 #include "backend/appData.h"
+#include "backend/metaData.h" // ibCompileValueCache::GetModuleManager (designer compile-cache)
 #include "backend/compiler/cache/byteCodeCache.h"
 
 //***********************************************************************
 //*                           ModuleObject                              *
 //***********************************************************************
 
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueMetaObjectModuleBase, ibValueMetaObject);
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectModule, ibValueMetaObjectModuleBase);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectCommonModule, ibValueMetaObjectModuleBase);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectManagerModule, ibValueMetaObjectCommonModule);
 
 //***********************************************************************
 //*                           System metaData                           *
@@ -161,9 +158,16 @@ bool ibValueMetaObjectCommonModule::OnDeleteMetaObject()
 
 bool ibValueMetaObjectCommonModule::OnRenameMetaObject(const wxString& newName)
 {
+	// Runtime registry (metadata storage) — read by per-session managers.
 	if (auto* storage = m_metaData->GetModuleStorage()) {
 		if (!storage->RenameCommonModule(this, newName))
 			return false;
+	}
+
+	// Designer registry — the editor's own compiled-unit holder.
+	if (auto* cc = m_metaData->GetCompileCache()) {
+		if (auto* mgr = cc->GetModuleManager())
+			mgr->RenameCommonModule(this, newName);
 	}
 
 	return ibValueMetaObjectModuleBase::OnRenameMetaObject(newName);
@@ -174,6 +178,15 @@ bool ibValueMetaObjectCommonModule::OnBeforeRunMetaObject(int flags)
 	if (auto* storage = m_metaData->GetModuleStorage()) {
 		if (!storage->AddCommonModule(this))
 			return false;
+	}
+
+	// Designer registry: register a compiled lightweight unit. newObjectFlag = a
+	// module just created in the designer → compile now; bulk load defers to
+	// the manager's CreateMainModule.
+	if (auto* cc = m_metaData->GetCompileCache()) {
+		if (auto* mgr = cc->GetModuleManager())
+			if (!mgr->AddCommonModule(this, /*managerModule=*/false, (flags & newObjectFlag) != 0))
+				return false;
 	}
 
 	return ibValueMetaObjectModuleBase::OnBeforeRunMetaObject(flags);
@@ -191,7 +204,15 @@ bool ibValueMetaObjectCommonModule::OnBeforeCloseMetaObject()
 			return false;
 	}
 
-	return ibValueMetaObjectModuleBase::OnAfterCloseMetaObject();
+	if (auto* cc = m_metaData->GetCompileCache()) {
+		if (auto* mgr = cc->GetModuleManager())
+			mgr->RemoveCommonModule(this);
+	}
+
+	// Was OnAfterCloseMetaObject — a long-standing copy/paste that fired the
+	// after-hook from the before phase (and skipped the real before-hook).
+	// ibValueMetaObjectManagerModule (the sibling) already does this correctly.
+	return ibValueMetaObjectModuleBase::OnBeforeCloseMetaObject();
 }
 
 bool ibValueMetaObjectCommonModule::OnAfterCloseMetaObject()
@@ -210,6 +231,13 @@ bool ibValueMetaObjectManagerModule::OnBeforeRunMetaObject(int flags)
 			return false;
 	}
 
+	// Designer registry — a manager module registers as managerModule=true.
+	if (auto* cc = m_metaData->GetCompileCache()) {
+		if (auto* mgr = cc->GetModuleManager())
+			if (!mgr->AddCommonModule(this, /*managerModule=*/true, (flags & newObjectFlag) != 0))
+				return false;
+	}
+
 	return ibValueMetaObjectModuleBase::OnBeforeRunMetaObject(flags);
 }
 
@@ -223,6 +251,11 @@ bool ibValueMetaObjectManagerModule::OnBeforeCloseMetaObject()
 	if (auto* storage = m_metaData->GetModuleStorage()) {
 		if (!storage->RemoveCommonModule(this))
 			return false;
+	}
+
+	if (auto* cc = m_metaData->GetCompileCache()) {
+		if (auto* mgr = cc->GetModuleManager())
+			mgr->RemoveCommonModule(this);
 	}
 
 	return ibValueMetaObjectModuleBase::OnBeforeCloseMetaObject();

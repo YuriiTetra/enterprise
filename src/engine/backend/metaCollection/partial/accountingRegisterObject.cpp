@@ -12,117 +12,8 @@
 
 ////////////////////////////////////////////////////////////////////////////////////////////////////
 
-bool ibValueRecordSetObjectAccountingRegister::WriteRecordSet(bool replace, bool clearTable)
-{
-	if (!appData->DesignerMode())
-	{
-		ibConnectionScope scope = ibSession::Current()->OpenConnectionScope();
-
-		if (!scope || !scope->IsOpen())
-			ibBackendCoreException::Error(_("Database is not open!"));
-
-		if (!ibBackendException::IsEvalMode())
-		{
-			if (!m_metaObject->AccessRight_Write()) {
-				ibBackendAccessException::Error();
-				return false;
-			}
-
-			{
-				scope.SafeBeginTransaction();
-
-				{
-					ibValue cancel = false;
-					ExecAsProc(wxT("BeforeWrite"), cancel);
-
-					if (cancel.GetBoolean()) {
-						scope.SafeRollBackTransaction();
-						ibBackendCoreException::Error(_("Failed to write object in db!"));
-						return false;
-					}
-				}
-
-				if (!SaveData(replace, clearTable)) {
-					scope.SafeRollBackTransaction();
-					ibBackendCoreException::Error(_("Failed to write object in db!"));
-					return false;
-				}
-
-				{
-					ibValue cancel = false;
-					ExecAsProc(wxT("OnWrite"), cancel);
-					if (cancel.GetBoolean()) {
-						scope.SafeRollBackTransaction();
-						ibBackendCoreException::Error(_("Failed to write object in db!"));
-						return false;
-					}
-				}
-
-				scope.SafeCommitTransaction();
-			}
-
-			m_objModified = false;
-		}
-	}
-
-	return true;
-}
-
-bool ibValueRecordSetObjectAccountingRegister::DeleteRecordSet()
-{
-	if (!appData->DesignerMode())
-	{
-		ibConnectionScope scope = ibSession::Current()->OpenConnectionScope();
-
-		if (!scope || !scope->IsOpen())
-			ibBackendCoreException::Error(_("Database is not open!"));
-
-		if (!ibBackendException::IsEvalMode())
-		{
-			if (!m_metaObject->AccessRight_Delete()) {
-				ibBackendAccessException::Error();
-				return false;
-			}
-
-			{
-				scope.SafeBeginTransaction();
-
-				{
-					ibValue cancel = false;
-					ExecAsProc(wxT("BeforeDelete"), cancel);
-
-					if (cancel.GetBoolean()) {
-						scope.SafeRollBackTransaction();
-						ibBackendCoreException::Error(_("Failed to delete object in db!"));
-						return false;
-					}
-				}
-
-				if (!DeleteData()) {
-					scope.SafeRollBackTransaction();
-					ibBackendCoreException::Error(_("Failed to delete object in db!"));
-					return false;
-				}
-
-				{
-					ibValue cancel = false;
-					ExecAsProc(wxT("OnDelete"), cancel);
-					if (cancel.GetBoolean()) {
-						scope.SafeRollBackTransaction();
-						ibBackendCoreException::Error(_("Failed to delete object in db!"));
-						return false;
-					}
-				}
-
-				scope.SafeCommitTransaction();
-			}
-
-			m_objModified = false;
-		}
-	}
-
-	return true;
-}
+// WriteRecordSet / DeleteRecordSet inherited from ibValueRecordSetObject
+// (Phase B template-method) — see commonObjectRecordSetQuery.cpp.
 
 bool ibValueRecordSetObjectAccountingRegister::SaveVirtualTable() { return true; }
 bool ibValueRecordSetObjectAccountingRegister::DeleteVirtualTable() { return true; }
@@ -141,33 +32,25 @@ enum func
 	eGetMetadataRecordSet,
 };
 
-enum prop
-{
-	eThisObject,
-	eFilter
-};
-
 //****************************************************************************
 //*                              Support methods                             *
 //****************************************************************************
 
-void ibValueRecordSetObjectAccountingRegister::PrepareNames() const
+void ibValueRecordSetObjectAccountingRegister::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
+	helper.AppendFunc(wxT("Add"), wxT("Add()"));
+	helper.AppendFunc(wxT("Count"), wxT("Count()"));
+	helper.AppendFunc(wxT("Clear"), wxT("Clear()"));
+	helper.AppendFunc(wxT("Write"), 1, wxT("Write(replace : boolean)"));
+	helper.AppendFunc(wxT("Load"), 1, wxT("Load(value: table)"));
+	helper.AppendFunc(wxT("Unload"), wxT("Unload()"));
+	helper.AppendFunc(wxT("Modified"), wxT("Modified()"));
+	helper.AppendFunc(wxT("Read"), wxT("Read()"));
+	helper.AppendFunc(wxT("Selected"), wxT("Selected()"));
+	helper.AppendFunc(wxT("GetMetadata"), wxT("GetMetadata()"));
 
-	m_methodHelper->AppendFunc(wxT("Add"), wxT("Add()"));
-	m_methodHelper->AppendFunc(wxT("Count"), wxT("Count()"));
-	m_methodHelper->AppendFunc(wxT("Clear"), wxT("Clear()"));
-	m_methodHelper->AppendFunc(wxT("Write"), 1, wxT("Write(replace : boolean)"));
-	m_methodHelper->AppendFunc(wxT("Load"), 1, wxT("Load(value: table)"));
-	m_methodHelper->AppendFunc(wxT("Unload"), wxT("Unload()"));
-	m_methodHelper->AppendFunc(wxT("Modified"), wxT("Modified()"));
-	m_methodHelper->AppendFunc(wxT("Read"), wxT("Read()"));
-	m_methodHelper->AppendFunc(wxT("Selected"), wxT("Selected()"));
-	m_methodHelper->AppendFunc(wxT("GetMetadata"), wxT("GetMetadata()"));
-
-	m_methodHelper->AppendProp(wxT("ThisObject"), true, false, true, prop::eThisObject, wxNOT_FOUND);
-	m_methodHelper->AppendProp(wxT("Filter"), true, false, prop::eFilter, wxNOT_FOUND);
+	// ThisObject + Filter are bound in InitializeObject (context / export) —
+	// no manual prop AppendProp on the record-set helper.
 }
 
 bool ibValueRecordSetObjectAccountingRegister::SetPropVal(const long lPropNum, const ibValue& varPropVal)
@@ -177,16 +60,6 @@ bool ibValueRecordSetObjectAccountingRegister::SetPropVal(const long lPropNum, c
 
 bool ibValueRecordSetObjectAccountingRegister::GetPropVal(const long lPropNum, ibValue& pvarPropVal)
 {
-	switch (lPropNum)
-	{
-	case prop::eThisObject:
-		pvarPropVal = this;
-		return true;
-	case prop::eFilter:
-		pvarPropVal = m_recordSetKeyValue;
-		return true;
-	}
-
 	return false;
 }
 
@@ -195,7 +68,7 @@ bool ibValueRecordSetObjectAccountingRegister::CallAsFunc(const long lMethodNum,
 	switch (lMethodNum)
 	{
 	case func::eAdd:
-		pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueRecordSetObjectRegisterReturnLine>(this, GetItem(AppendRow()));
+		pvarRetValue = new ibValueRecordSetObjectRegisterReturnLine(this, GetItem(AppendRow()));
 		return true;
 	case func::eCount:
 		pvarRetValue = (unsigned int)GetRowCount();

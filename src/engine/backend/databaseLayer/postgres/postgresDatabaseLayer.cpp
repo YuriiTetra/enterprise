@@ -6,6 +6,61 @@
 #include "backend/databaseLayer/databaseErrorCodes.h"
 #include "backend/databaseLayer/databaseLayerException.h"
 
+// The PostgreSQL SQL dialect lives WITH its driver — no central factory, no
+// type-switch. Static so a test (or anyone) can read it WITHOUT constructing
+// the driver (no libpq); the virtual GetDialect() just exposes it to L2.
+// Cached singleton (built once, immutable), returned by reference — zero cost.
+const ibDialectDictionary& ibDatabaseLayerPostgres::Dialect()
+{
+	static const ibDialectDictionary s_dialect = [] {
+		ibDialectDictionary d;
+		d.m_paramStyle = ibParamStyle::DollarN;       // $1, $2, ...
+		d.m_pagination = ibPagination::LimitOffset;
+		d.m_boolForm   = ibBoolForm::TrueFalse;
+		d.m_features.m_window        = true;
+		d.m_features.m_cte           = true;
+		d.m_features.m_fullOuterJoin = true;
+		d.m_features.m_iLike         = true;
+		d.m_features.m_rollup        = true;   // GROUP BY ROLLUP(...) — standard spelling
+		// type map
+		d.m_typeBoolean       = wxT("BOOLEAN");
+		d.m_typeDate          = wxT("TIMESTAMP");
+		d.m_typeBlob          = wxT("BYTEA");
+		d.m_typeGuid          = wxT("UUID");
+		d.m_typeNumberPattern = wxT("NUMERIC(%d,%d)");
+		return d;
+	}();
+	return s_dialect;
+}
+
+const ibDialectDictionary& ibDatabaseLayerPostgres::GetDialect() const
+{
+	return Dialect();
+}
+
+// PostgreSQL is the FIRST (and primary) DB temp-table target — ad-hoc `CREATE TEMPORARY TABLE` of
+// any shape per query. Strategy = AdHocCreate; lifetime is explicit (the manager DROPs via its
+// pinning scope, deterministic, no dependency on commit timing — so m_autoDrops=false, no ON
+// COMMIT clause). Its mere PRESENCE flips PG off the RAM floor onto the temp path. (docs/temp-db.md)
+const ibTempTableDialect& ibDatabaseLayerPostgres::TempDialect()
+{
+	static const ibTempTableDialect s_temp = [] {
+		ibTempTableDialect t;
+		t.m_strategy      = ibTempTableDialect::Strategy::AdHocCreate;
+		t.m_createPrefix  = wxT("CREATE TEMPORARY TABLE");
+		t.m_onCommitClause = wxEmptyString;     // session-scoped; the manager drops it explicitly
+		t.m_autoDrops     = false;              // explicit DROP via the pinning scope (RAII, leak-free)
+		t.m_dropPrefix    = wxT("DROP TABLE");
+		return t;
+	}();
+	return s_temp;
+}
+
+const ibTempTableDialect* ibDatabaseLayerPostgres::GetTempTableDialect() const
+{
+	return &TempDialect();
+}
+
 // ctor
 ibDatabaseLayerPostgres::ibDatabaseLayerPostgres()
 	: ibDatabaseLayer(), m_pDatabase(nullptr)
@@ -393,7 +448,7 @@ bool ibDatabaseLayerPostgres::TryProbeRowLock(const wxString& tableName,
 		catch (...) { gotLock = false; }
 		CloseStatement(stmt);
 	}
-	try { RollBack(); } catch (...) {}
+	try { RollBack(); } catch (...) { /* swallowed: TryProbeRowLock always rolls back so no lock survives — failure here means lock is gone anyway */ }
 	return gotLock;
 }
 
@@ -465,11 +520,7 @@ bool ibDatabaseLayerPostgres::DatabaseExists(const wxString& database)
 	//  in case of an error
 	ibPreparedStatement* pStatement = nullptr;
 	ibDatabaseResultSet* pResult = nullptr;
-
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString query = wxT("SELECT COUNT(*) FROM pg_catalog.pg_database WHERE datname=?;");
 		pStatement = DoPrepareStatement(query);
 		if (pStatement != nullptr) {
@@ -483,10 +534,7 @@ bool ibDatabaseLayerPostgres::DatabaseExists(const wxString& database)
 				}
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
@@ -498,21 +546,19 @@ bool ibDatabaseLayerPostgres::DatabaseExists(const wxString& database)
 			CloseStatement(pStatement);
 			pStatement = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	if (pStatement != nullptr)
-	{
-		CloseStatement(pStatement);
-		pStatement = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open resources before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		if (pStatement != nullptr) {
+			CloseStatement(pStatement);
+			pStatement = nullptr;
+		}
+		throw;
 	}
 
 	return bReturn;
@@ -526,11 +572,7 @@ bool ibDatabaseLayerPostgres::TableExists(const wxString& table)
 	//  in case of an error
 	ibPreparedStatement* pStatement = nullptr;
 	ibDatabaseResultSet* pResult = nullptr;
-
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString query = wxT("SELECT COUNT(*) FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_name=?;");
 		pStatement = DoPrepareStatement(query);
 		if (pStatement != nullptr) {
@@ -544,10 +586,7 @@ bool ibDatabaseLayerPostgres::TableExists(const wxString& table)
 				}
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
@@ -559,21 +598,19 @@ bool ibDatabaseLayerPostgres::TableExists(const wxString& table)
 			CloseStatement(pStatement);
 			pStatement = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	if (pStatement != nullptr)
-	{
-		CloseStatement(pStatement);
-		pStatement = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open resources before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		if (pStatement != nullptr) {
+			CloseStatement(pStatement);
+			pStatement = nullptr;
+		}
+		throw;
 	}
 
 	return bReturn;
@@ -587,11 +624,7 @@ bool ibDatabaseLayerPostgres::ViewExists(const wxString& view)
 	//  in case of an error
 	ibPreparedStatement* pStatement = nullptr;
 	ibDatabaseResultSet* pResult = nullptr;
-
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString query = wxT("SELECT COUNT(*) FROM information_schema.tables WHERE table_type='VIEW' AND table_name=?;");
 		pStatement = DoPrepareStatement(query);
 		if (pStatement) {
@@ -605,10 +638,7 @@ bool ibDatabaseLayerPostgres::ViewExists(const wxString& view)
 				}
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
@@ -620,21 +650,19 @@ bool ibDatabaseLayerPostgres::ViewExists(const wxString& view)
 			CloseStatement(pStatement);
 			pStatement = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	if (pStatement != nullptr)
-	{
-		CloseStatement(pStatement);
-		pStatement = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open resources before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		if (pStatement != nullptr) {
+			CloseStatement(pStatement);
+			pStatement = nullptr;
+		}
+		throw;
 	}
 
 	return bReturn;
@@ -645,10 +673,7 @@ wxArrayString ibDatabaseLayerPostgres::GetTables()
 	wxArrayString returnArray;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString query = wxT("SELECT table_name FROM information_schema.tables WHERE table_type='BASE TABLE' AND table_schema='public';");
 		pResult = ExecuteQuery(query);
 
@@ -656,24 +681,21 @@ wxArrayString ibDatabaseLayerPostgres::GetTables()
 		{
 			returnArray.Add(pResult->GetResultString(1));
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return returnArray;
@@ -684,10 +706,7 @@ wxArrayString ibDatabaseLayerPostgres::GetViews()
 	wxArrayString returnArray;
 
 	ibDatabaseResultSet* pResult = nullptr;
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString query = wxT("SELECT table_name FROM information_schema.tables WHERE table_type='VIEW' AND table_schema='public';");
 		pResult = ExecuteQuery(query);
 
@@ -695,24 +714,21 @@ wxArrayString ibDatabaseLayerPostgres::GetViews()
 		{
 			returnArray.Add(pResult->GetResultString(1));
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
 			pResult = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open result set before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		throw;
 	}
 
 	return returnArray;
@@ -727,11 +743,7 @@ wxArrayString ibDatabaseLayerPostgres::GetColumns(const wxString& table)
 	//  in case of an error
 	ibPreparedStatement* pStatement = nullptr;
 	ibDatabaseResultSet* pResult = nullptr;
-
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	try
-	{
-#endif
+	try {
 		wxString query = wxT("SELECT column_name FROM information_schema.columns WHERE table_name=? ORDER BY ordinal_position;");
 		pStatement = DoPrepareStatement(query);
 		if (pStatement)
@@ -746,10 +758,8 @@ wxArrayString ibDatabaseLayerPostgres::GetColumns(const wxString& table)
 				}
 			}
 		}
-#if _USE_DATABASE_LAYER_EXCEPTIONS == 1
-	}
-	catch (ibDatabaseLayerException& e)
-	{
+
+
 		if (pResult != nullptr)
 		{
 			CloseResultSet(pResult);
@@ -761,21 +771,19 @@ wxArrayString ibDatabaseLayerPostgres::GetColumns(const wxString& table)
 			CloseStatement(pStatement);
 			pStatement = nullptr;
 		}
-
-		throw e;
 	}
-#endif
-
-	if (pResult != nullptr)
-	{
-		CloseResultSet(pResult);
-		pResult = nullptr;
-	}
-
-	if (pStatement != nullptr)
-	{
-		CloseStatement(pStatement);
-		pStatement = nullptr;
+	catch (const ibBackendException&) {
+		// Close any still-open resources before propagating; preserves the
+		// in-flight exception (sqlstate / native_code on derived types).
+		if (pResult != nullptr) {
+			CloseResultSet(pResult);
+			pResult = nullptr;
+		}
+		if (pStatement != nullptr) {
+			CloseStatement(pStatement);
+			pStatement = nullptr;
+		}
+		throw;
 	}
 
 	return returnArray;
@@ -787,6 +795,46 @@ int ibDatabaseLayerPostgres::TranslateErrorCode(int nCode)
 	// For now though, we'll just return error
 	return nCode;
 	//return DATABASE_LAYER_ERROR;
+}
+
+ibBackendDatabaseException::Kind ibDatabaseLayerPostgres::ClassifyDatabaseError(int nativeCode) const
+{
+	// PostgreSQL surfaces both a CONNECTION_* status enum (small int,
+	// connection-level only) and SQLSTATE (5-char alphanumeric — the
+	// real classifier). We prefer SQLSTATE when present; the int code
+	// is only used for connection-level failures where libpq doesn't
+	// produce a SQLSTATE at all.
+	//
+	// SQLSTATE classes:
+	//   08*** — connection exception           → ConnectionLost
+	//   23*** — integrity constraint violation → Constraint
+	//   40*** — transaction rollback           → Deadlock (40P01) /
+	//                                            Timeout (40001 serialization fail)
+	//   42*** — syntax / access rule violation → Syntax
+	//   53*** — insufficient resources         → Timeout
+	//   57*** — operator intervention          → ConnectionLost (admin shutdown)
+	//
+	// See https://www.postgresql.org/docs/current/errcodes-appendix.html
+	using Kind = ibBackendDatabaseException::Kind;
+
+	if (m_lastSqlState.length() >= 2) {
+		const wxString cls = m_lastSqlState.Left(2);
+		if (cls == wxT("08")) return Kind::ConnectionLost;
+		if (cls == wxT("23")) return Kind::Constraint;
+		if (cls == wxT("42")) return Kind::Syntax;
+		if (cls == wxT("57")) return Kind::ConnectionLost;
+		if (cls == wxT("53")) return Kind::Timeout;
+		if (cls == wxT("40")) {
+			// 40P01 = deadlock_detected, 40001 = serialization_failure
+			if (m_lastSqlState == wxT("40P01")) return Kind::Deadlock;
+			return Kind::Timeout;
+		}
+	}
+
+	// No SQLSTATE — fall back to the libpq connection-status enum.
+	// CONNECTION_BAD is the only one we surface in error paths today.
+	(void)nativeCode;
+	return Kind::Unknown;
 }
 
 bool ibDatabaseLayerPostgres::IsAvailable()

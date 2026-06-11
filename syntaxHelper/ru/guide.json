@@ -1,0 +1,51 @@
+{
+  "format": "OES-HELP-1.0",
+  "schema_version": 1,
+  "locale": "ru",
+  "entries": [
+    {
+      "id": "guide.syntaxHelper",
+      "name_local": "About the Syntax Helper",
+      "name_en": "About the Syntax Helper",
+      "kind": "keyword",
+      "category_keys": [
+        "guide"
+      ],
+      "signature": "",
+      "description": "Синтакс-помощник раскрывает каждое ключевое слово языка, встроенную функцию, примитивный тип и метаобъектный аксессор, доступные внутри конфигурации OES. Это документация только для чтения, которая живёт рядом с редактором — сама по себе она не изменяет конфигурацию.\n\nТри вкладки покрывают три способа навигации. Содержание группирует статьи по категориям. Указатель перечисляет все имена алфавитно с префиксным поиском. Поиск выполняет токенный запрос по именам и сигнатурам.\n\nКнопки на панели инструментов: Назад / Вперёд для отслеживания истории навигации, Обновить — перечитать справочные файлы без перезапуска, Синхронизация — найти идентификатор под кареткой редактора, кнопки Крупнее / Мельче — масштаб шрифта описаний. Нажмите RawCtrl+F1 (Ctrl+F1 на Windows / Linux) в редакторе, чтобы открыть помощник на идентификаторе под курсором; RawCtrl+Alt+F1 переключает панель.\n\nПеретаскивание: выберите статью в Указателе или Поиске (либо в дереве Содержания) и перетащите в редактор — соответствующий шаблон синтаксиса вставится в позицию броска. Шаблон учитывает активный режим компиляции (фигурные скобки CES или терминаторы End* VES).",
+      "syntax_block": "",
+      "parameters": "",
+      "return_descr": "",
+      "example": "",
+      "availability": "Designer, codeRunner, daemon, wenterprise-server",
+      "see_also": [],
+      "reviewed": true
+    },
+    {
+      "id": "guide.linq",
+      "name_local": "LINQ — запросы к коллекциям",
+      "name_en": "LINQ — collection queries",
+      "kind": "keyword",
+      "category_keys": [
+        "common_lang",
+        "linq"
+      ],
+      "signature": "from <item> in <source> [where ...] [orderby ...] [group ... by ... [into ...]] select ...",
+      "description": "LINQ — встроенные в язык запросы к коллекциям в памяти. Два параллельных синтаксиса компилируются в одни и те же примитивы.\n\n**Блочный синтаксис** (eager): `from <var> in <source>` открывает запрос; затем клаузы `where / var / orderby [asc|desc] / group X by K [into g] / join b in Y on a.K equals b.K / skip N / take N / distinct`; закрывается `select <expr>` или `select { F = expr, ... }`. Сразу материализуется в Array.\n\n**Чейн-синтаксис** (lazy): `arr.Where(λ).Select(λ).Distinct().Take(10).ToArray()`. Доступно 31 операция — конвейерные (Where / Select / Distinct / OrderBy / OrderByDescending / GroupBy / Join / Skip / Take / SkipWhile / TakeWhile / Reverse / Concat / Union / Intersect / Except / WhereIndexed / SelectIndexed), терминальные (Count / ToArray / First / Last / Single / Any / ElementAt / Contains / SequenceEqual / Aggregate плюс *OrDefault варианты), агрегации (Sum / Min / Max / Average — опционально с лямбда-селектором).\n\nЛямбды захватывают локальные переменные внешнего scope: `var k = 5; arr.Where(Function(x) { return x > k; })`.\n\nLINQ-ключевые слова компилируются одинаково в режимах CES и VES.",
+      "syntax_block": "var q = from o in orders\n        where o.Total > 100\n        var doubled = o.Total * 2\n        orderby o.Date descending\n        select { N = o.N, V = doubled };",
+      "parameters": "",
+      "return_descr": "Массив выбранных строк (блочный синтаксис) или ленивый итератор (чейн-синтаксис).",
+      "example": "// чейн-синтаксис — ленивый конвейер\nvar bigOnes = arr.Where(Function(x) { return x > 5; })\n                 .OrderByDescending(Function(x) { return x; })\n                 .Take(10)\n                 .ToArray();\n\n// агрегации с лямбда-селектором\nvar total = arr.Sum();\nvar avgK  = arr.Average(Function(x) { return x.K; });\n\n// group-into continuation\nvar pairs = from p in people\n            group p.Name by p.Country into g\n            where g.Values.Count() > 1\n            select { Country = g.Key, Names = g.Values };",
+      "availability": "Designer, codeRunner, daemon, wenterprise-server",
+      "see_also": [
+        "kw.From",
+        "kw.Where",
+        "kw.Select",
+        "kw.OrderBy",
+        "kw.Join",
+        "kw.Group"
+      ],
+      "reviewed": true
+    }
+  ]
+}

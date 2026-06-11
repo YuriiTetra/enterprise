@@ -150,6 +150,10 @@ struct ibByteCode {
 		bool IsContextProp() const { return m_kind == ibVarKind::ContextProp; }
 		// "Required to bind" — runtime binder fills these slots.
 		bool IsBindRequired() const { return m_kind == ibVarKind::External || m_kind == ibVarKind::Context; }
+		// "Bindable" — the binder MAY seed this slot. Adds plain Local (a bound
+		// local like a constant's Value): not must-bind, no pre-flight checks,
+		// filled only when the binder actually carries a value for it.
+		bool IsBindable() const { return IsBindRequired() || m_kind == ibVarKind::Local; }
 		// "User frame var" — visible to debugger's locals view.
 		bool IsUserLocal()    const { return m_kind == ibVarKind::Local || m_kind == ibVarKind::Export; }
 
@@ -305,6 +309,15 @@ struct ibByteCode {
 		// GetVariable bc walk) reads this to resolve the host's locals
 		// at depth=1 from an eval expression.
 		std::vector<ibByteCodeVarInfo> m_listLocals;
+
+		// L4-2 LINQ pushdown — the lambda body recorded as the L4 query AST
+		// (compiler/lambdaQueryAst.*), set ONLY for a single-parameter
+		// lambda whose body is a translatable single expression; null = the
+		// pipeline runs in RAM (the always-correct floor). Deliberately NOT
+		// serialised into the AOT cache: on a cache hit the AST is absent and
+		// the pushdown silently degrades to RAM — correctness is unaffected,
+		// so the AOT format needs no bump. (docs/query-language-arc.md §23.5)
+		std::shared_ptr<struct ibQueryAstExpr> m_lambdaExprAst;
 
 		ibByteFunction() = default;
 
@@ -493,8 +506,10 @@ public:
 	// Format constants live in byteCodeAOT.cpp; bump
 	// kAOTFormatVersion when the layout changes — readers reject
 	// older blobs and fall back to recompile.
-	bool SerializeAOT(ibWriterMemory& writer) const;
-	bool DeserializeAOT(const ibReaderMemory& reader);
+	// Exported individually (the struct itself isn't BACKEND_API): the AOT
+	// cache API is the public seam tools / tests call across the DLL boundary.
+	BACKEND_API bool SerializeAOT(ibWriterMemory& writer) const;
+	BACKEND_API bool DeserializeAOT(const ibReaderMemory& reader);
 
 	// ----------------------------------------------------------------
 	// Process-wide bytecode registry — keyed by descriptor GUID

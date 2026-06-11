@@ -4,13 +4,12 @@
 #include <wx/html/htmlwin.h>
 
 class ibValueHTMLBox : public ibValueWindow {
-	wxDECLARE_DYNAMIC_CLASS(ibValueHTMLBox);
-public:
+	public:
 
 	ibValueHTMLBox(); 
 
-	//methods 
-	virtual void PrepareNames() const;                         // this method is automatically called to initialize attribute and method names.
+	//methods
+	void FillControlMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 	virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);       //method call
 
 	virtual wxObject* Create(ibFrontendWindow* wxparent, ibVisualHost *visualHost) override;

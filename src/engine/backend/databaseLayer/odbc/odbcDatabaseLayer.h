@@ -61,6 +61,16 @@ public:
 	virtual bool TryProbeRowLock(const wxString& tableName,
 		const wxString& pkColumn, const wxString& pkValue) override;
 
+	// Write-time row-lock dialect (see docs/record-locks.md). MSSQL
+	// behind ODBC takes the row lock via table hint
+	// "WITH (UPDLOCK, ROWLOCK)" placed after FROM <table>. Callers that
+	// build the SELECT need to place the hint inline (not at end of
+	// statement); a future helper on the layer can wrap that. NOWAIT
+	// is carried session-side via `SET LOCK_TIMEOUT 0` (ibTxOptions::
+	// noWait), so the SQL clause stays empty.
+	wxString RowLockHint() const override { return wxT("WITH (UPDLOCK, ROWLOCK)"); }
+	wxString NoWaitClause() const override { return wxEmptyString; }
+
 	// Database schema API contributed by M. Szeftel (author of wxActiveRecordGenerator)
 	virtual bool TableExists(const wxString& table);
 	virtual bool ViewExists(const wxString& view);
@@ -72,7 +82,27 @@ public:
 		return DATABASELAYER_ODBC;
 	}
 
+	// ODBC fronts many backends — the dialect is the default-constructed ANSI
+	// baseline (? params, LIMIT/OFFSET). This is the home of the generic default.
+	static const ibDialectDictionary& Dialect() {
+		static const ibDialectDictionary s_dialect;   // default ctor = ANSI baseline
+		return s_dialect;
+	}
+	virtual const ibDialectDictionary& GetDialect() const override { return Dialect(); }
+
 	static bool IsAvailable();
+
+	// SQLSTATE-based classification — ODBC's standard error identifier
+	// is the same 5-char SQLSTATE as SQL standard / PostgreSQL. Backends
+	// reachable through ODBC (MSSQL, Oracle, DB2, etc.) all funnel their
+	// errors through this format, so the class-digit dispatch is the
+	// portable choice.
+	ibBackendDatabaseException::Kind ClassifyDatabaseError(int nativeCode) const override;
+	wxString GetSqlState() const override { return m_lastSqlState; }
+
+	// Stash the most recent SQLSTATE pulled from SQLGetDiagRec so the
+	// next ThrowDatabaseException carries it.
+	void SetLastSqlState(const wxString& s) { m_lastSqlState = s; }
 
 protected:
 
@@ -111,6 +141,11 @@ private:
 
 	bool m_bIsConnected;
 	ibInterfaceODBC* m_pInterface;
+
+	// Stashed by SetLastSqlState() — most recent SQLSTATE pulled from
+	// SQLGetDiagRec. Travels with the next ThrowDatabaseException so
+	// admin logs see what the driver actually reported.
+	wxString m_lastSqlState;
 
 public:
 

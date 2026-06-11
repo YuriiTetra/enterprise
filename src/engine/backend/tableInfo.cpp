@@ -6,19 +6,40 @@
 #include "tableInfo.h"
 
 #include "backend/session/session.h"
+#include "backend/query/querySelectorTree.h"   // ibSelectorTree — PopulateFromTree mirror source
 
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueModel, ibValue);
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueModel::ibValueModelColumnCollection, ibValue);
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueModel::ibValueModelColumnCollection::ibValueModelColumnInfo, ibValue);
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueModel::ibValueModelReturnLine, ibValue);
+namespace {
+	// Recursively mirror an L3 Selector-tree subtree under `dst`. No per-node notification —
+	// PopulateFromTree fires one reset after the whole tree is in place.
+	void MirrorQueryNodes(ibValueModelTreeBase::ibValueTreeNode* dst,
+		const ibSelectorTree::Node& src)
+	{
+		for (const auto& childPtr : src.m_children) {
+			const ibSelectorTree::Node& s = *childPtr;
+			ibValueModelTreeBase::ibValueTreeNode* node = dst->AddChildNode();
+			for (const auto& kv : s.m_values)
+				node->AppendTableValue(kv.first, kv.second);
+			MirrorQueryNodes(node, s);
+		}
+	}
+}
 
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueModelTableBase, ibValueModel);
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueModelRamTableBase, ibValueModelTableBase);
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueModelTreeBase, ibValueModel);
-wxIMPLEMENT_ABSTRACT_CLASS(ibValueModelRamTreeBase, ibValueModelTreeBase);
+void ibValueModelRamTreeBase::PopulateFromTree(const ibSelectorTree& tree, bool notify)
+{
+	Clear(/*notify*/ false);                  // drop the old children silently
+	MirrorQueryNodes(m_root, tree.Root());    // mirror the whole Node tree in one shot
+	if (notify && m_modelProvider != nullptr) {
+		// Full-shape change — the paged tree rebuilds on Before/AfterReset (see the
+		// HasDefaultCompare note in tableInfo.h); the control re-fetches via GetFirstFetch.
+		m_modelProvider->BeforeReset();
+		m_modelProvider->AfterReset();
+	}
+}
+
+
 
 ibValueModel::ibValueModel()
-	: ibValue(ibValueTypes::TYPE_VALUE),
+	: ibValueDynamicMembers(ibValueTypes::TYPE_VALUE),
 	m_modelProvider(nullptr)
 {
 	m_modelProvider = new ibDataViewModelProviderImpl(this);
@@ -244,13 +265,13 @@ bool ibValueModel::ShowViewMode()
 ///////////////////////////////////////////////////////////////////////////////////////
 
 ibValueModel::ibValueModelColumnCollection::ibValueModelColumnInfo::ibValueModelColumnInfo() :
-	ibValue(ibValueTypes::TYPE_VALUE, true), m_methodHelper(new ibValueMethodHelper())
+	ibValueDynamicMembers(ibValueTypes::TYPE_VALUE, true)
 {
+	m_members.Bind(this, &ibValueModelColumnInfo::FillMembers);
 }
 
 ibValueModel::ibValueModelColumnCollection::ibValueModelColumnInfo::~ibValueModelColumnInfo()
 {
-	wxDELETE(m_methodHelper);
 }
 
 enum Prop {
@@ -260,14 +281,12 @@ enum Prop {
 	enColumnWidth
 };
 
-void ibValueModel::ibValueModelColumnCollection::ibValueModelColumnInfo::PrepareNames() const
+void ibValueModel::ibValueModelColumnCollection::ibValueModelColumnInfo::FillMembers(ibMemberTable& helper) const
 {
-	m_methodHelper->ClearHelper();
-
-	m_methodHelper->AppendProp(wxT("Name"));
-	m_methodHelper->AppendProp(wxT("Types"));
-	m_methodHelper->AppendProp(wxT("Caption"));
-	m_methodHelper->AppendProp(wxT("Width"));
+	helper.AppendProp(wxT("Name"));
+	helper.AppendProp(wxT("Types"));
+	helper.AppendProp(wxT("Caption"));
+	helper.AppendProp(wxT("Width"));
 }
 
 bool ibValueModel::ibValueModelColumnCollection::ibValueModelColumnInfo::GetPropVal(const long lPropNum, ibValue& pvarPropVal)
@@ -278,7 +297,7 @@ bool ibValueModel::ibValueModelColumnCollection::ibValueModelColumnInfo::GetProp
 		pvarPropVal = GetColumnName();
 		return true;
 	case enColumnTypes:
-		pvarPropVal = ibValue::CreateAndPrepareValueRef<ibValueTypeDescription>(GetColumnType());
+		pvarPropVal = new ibValueTypeDescription(GetColumnType());
 		return true;
 	case enColumnCaption:
 		pvarPropVal = GetColumnCaption();

@@ -1,0 +1,1 @@
+var e={catalogs:`catalog`,documents:`document`,enumerations:`enumeration`,informationRegisters:`informationRegister`,accumulationRegisters:`accumulationRegister`,accountingRegisters:`accountingRegister`,reports:`report`,dataProcessors:`dataProcessor`,constants:`constant`};function t(t,n){return`${e[t]??t}.${n}`}export{t};

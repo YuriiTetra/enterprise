@@ -2,13 +2,12 @@
 #include "list/objectList.h"
 #include "backend/metaData.h"
 #include "backend/moduleManager/moduleManager.h"
+#include "backend/query/queryableHooks.h"   // light L4 source registration hooks (slice descriptors)
 
 //***********************************************************************
 //*                         metaData                                    * 
 //***********************************************************************
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectInformationRegister::ibValueMetaObjectRecordManager, ibValueMetaObject);
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectInformationRegister, ibValueMetaObjectRegisterData);
 
 /////////////////////////////////////////////////////////////////////////
 
@@ -53,7 +52,7 @@ ibBackendValueForm* ibValueMetaObjectInformationRegister::GetListForm(const wxSt
 	return ibValueMetaObjectGenericData::CreateAndBuildForm(
 		strFormName,
 		ibValueMetaObjectInformationRegister::eFormList,
-		ownerControl, ibValue::CreateAndPrepareValueRef<ibValueListRegisterObject>(this, ibValueMetaObjectInformationRegister::eFormList),
+		ownerControl, new ibValueListRegisterObject(this, ibValueMetaObjectInformationRegister::eFormList),
 		formGuid
 	);
 }
@@ -196,6 +195,13 @@ bool ibValueMetaObjectInformationRegister::OnAfterRunMetaObject(int flags)
 	if (!(*m_propertyManagerModule)->OnAfterRunMetaObject(flags))
 		return false;
 
+	// Custom virtual-table descriptors (slices). The base records descriptor is registered by
+	// ibValueMetaObjectRegisterData::OnAfterRunMetaObject below. Skip the onlyLoadFlag pass.
+	if (!(flags & onlyLoadFlag)) {
+		ibRegisterQueryableSource(&m_sliceLast);
+		ibRegisterQueryableSource(&m_sliceFirst);
+	}
+
 	if (!(*m_propertyObjectModule)->OnAfterRunMetaObject(flags))
 		return false;
 
@@ -219,6 +225,9 @@ bool ibValueMetaObjectInformationRegister::OnAfterRunMetaObject(int flags)
 
 bool ibValueMetaObjectInformationRegister::OnBeforeCloseMetaObject()
 {
+	ibUnregisterQueryableSource(&m_sliceLast);
+	ibUnregisterQueryableSource(&m_sliceFirst);
+
 	if (!(*m_propertyManagerModule)->OnBeforeCloseMetaObject())
 		return false;
 
@@ -284,7 +293,7 @@ void ibValueMetaObjectInformationRegister::OnRemoveMetaForm(ibValueMetaObjectFor
 	else if (metaForm->GetTypeForm() == ibValueMetaObjectInformationRegister::eFormList
 		&& m_propertyDefFormList->GetValueAsInteger() == metaForm->GetMetaID())
 	{
-		m_propertyDefFormList->SetValue(metaForm->GetMetaID());
+		m_propertyDefFormList->SetValue(wxNOT_FOUND);
 	}
 }
 
@@ -292,7 +301,7 @@ void ibValueMetaObjectInformationRegister::OnRemoveMetaForm(ibValueMetaObjectFor
 
 ibValueManagerDataObject* ibValueMetaObjectInformationRegister::CreateManagerDataObjectValue() const
 {
-	return ibValue::CreateAndPrepareValueRef<ibValueManagerDataObjectInformationRegister>(this);
+	return new ibValueManagerDataObjectInformationRegister(this);
 }
 
 ibValueRecordSetObject* ibValueMetaObjectInformationRegister::CreateRecordSetObjectRegValue(const ibUniqueKeyPair& uniqueKey) const
@@ -300,12 +309,12 @@ ibValueRecordSetObject* ibValueMetaObjectInformationRegister::CreateRecordSetObj
 	if (auto* cc = m_metaData->GetCompileCache()) {
 		ibValueRecordSetObject* pDataRef = nullptr;
 		if (!cc->FindCompileModule(m_propertyObjectModule->GetMetaObject(), pDataRef)) {
-			return ibValue::CreateAndPrepareValueRef<ibValueRecordSetObjectInformationRegister>(this, uniqueKey);
+			return new ibValueRecordSetObjectInformationRegister(this, uniqueKey);
 		}
 		return pDataRef;
 	}
 
-	return ibValue::CreateAndPrepareValueRef<ibValueRecordSetObjectInformationRegister>(this, uniqueKey);
+	return new ibValueRecordSetObjectInformationRegister(this, uniqueKey);
 }
 
 ibValueRecordManagerObject* ibValueMetaObjectInformationRegister::CreateRecordManagerObjectRegValue(const ibUniqueKeyPair& uniqueKey) const
@@ -313,11 +322,11 @@ ibValueRecordManagerObject* ibValueMetaObjectInformationRegister::CreateRecordMa
 	if (auto* cc = m_metaData->GetCompileCache()) {
 		ibValueRecordManagerObject* pDataRef = nullptr;
 		if (!cc->FindCompileModule(m_metaRecordManager, pDataRef)) {
-			return ibValue::CreateAndPrepareValueRef<ibValueRecordManagerObjectInformationRegister>(this, uniqueKey);
+			return new ibValueRecordManagerObjectInformationRegister(this, uniqueKey);
 		}
 		return pDataRef;
 	}
-	return ibValue::CreateAndPrepareValueRef<ibValueRecordManagerObjectInformationRegister>(this, uniqueKey);
+	return new ibValueRecordManagerObjectInformationRegister(this, uniqueKey);
 }
 
 ibSourceDataObject* ibValueMetaObjectInformationRegister::CreateSourceObject(const ibValueMetaObjectFormBase* metaObject) const
@@ -327,7 +336,7 @@ ibSourceDataObject* ibValueMetaObjectInformationRegister::CreateSourceObject(con
 	case eFormRecord:
 		return CreateRecordManagerObjectValue();
 	case eFormList:
-		return ibValue::CreateAndPrepareValueRef<ibValueListRegisterObject>(this, metaObject->GetTypeForm());
+		return new ibValueListRegisterObject(this, metaObject->GetTypeForm());
 	}
 
 	return nullptr;

@@ -26,9 +26,9 @@ public:
 
 	virtual void Modify(bool modify);
 
-	virtual bool OpenFormMDI(ibValueMetaObject* metaObject);
-	virtual bool OpenFormMDI(ibValueMetaObject* metaObject, ibBackendMetaDocument*& foundedDoc);
-	virtual bool CloseFormMDI(ibValueMetaObject* metaObject);
+	virtual bool OpenObjectForm(ibValueMetaObject* metaObject);
+	virtual bool OpenObjectForm(ibValueMetaObject* metaObject, ibBackendMetaDocument*& foundedDoc);
+	virtual bool CloseObjectForm(ibValueMetaObject* metaObject);
 
 #pragma region __predefined_values_h__
 	virtual void EditPredefinedValues(ibValueMetaObjectRecordDataHierarchyMutableRef* obj) {}
@@ -199,7 +199,7 @@ private:
 		public:
 
 			ibMatadataTreeView(ibMetaTreeCtrl* tree) : m_ownerTree(tree) {}
-			virtual void OnActivateView(bool activate, wxView* activeView, wxView* deactiveView) override;
+			virtual void OnActivateView(bool activate, ibView* activeView, ibView* deactiveView) override;
 
 		private:
 			ibMetaTreeCtrl* m_ownerTree;

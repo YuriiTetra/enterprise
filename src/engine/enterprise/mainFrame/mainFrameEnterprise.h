@@ -15,22 +15,23 @@ enum {
 	wxID_ENTERPRISE_SETTING,
 	wxID_ENTERPRISE_USERS,
 	wxID_ENTERPRISE_ACTIVE_USERS,
+	wxID_ENTERPRISE_AUDIT_LOG,
 
 	wxID_ENTERPRISE_ABOUT,
 	wxID_ENTERPRISE_END
 };
 
-#define mainFrame	(ibFrontendDocMDIFrameEnterprise::GetFrame())
+#define mainFrame	(ibFrontendMainFrameEnterprise::GetFrame())
 
-class ibFrontendDocMDIFrameEnterprise : public ibFrontendDocMDIFrame {
+class ibFrontendMainFrameEnterprise : public ibFrontendMainFrame {
 public:
 
-	static ibFrontendDocMDIFrameEnterprise* GetFrame();
+	static ibFrontendMainFrameEnterprise* GetFrame();
 
-	ibFrontendDocMDIFrameEnterprise(const wxString& title = _("Enterprise"),
+	ibFrontendMainFrameEnterprise(const wxString& title = _("Enterprise"),
 		const wxPoint& pos = wxDefaultPosition,
 		const wxSize& size = wxDefaultSize);
-	virtual ~ibFrontendDocMDIFrameEnterprise();
+	virtual ~ibFrontendMainFrameEnterprise();
 
 	virtual void Message(const wxString& strMessage, ibStatusMessage status) { m_outputWindow->SharedOutput(strMessage, status); }
 	virtual void ClearMessage() { m_outputWindow->ClearAll(); }
@@ -62,6 +63,7 @@ protected:
 	void OnClickAllOperation(wxCommandEvent& event);
 	void OnToolsSettings(wxCommandEvent& event);
 	void OnActiveUsers(wxCommandEvent& event);
+	void OnAuditLog(wxCommandEvent& event);
 	void OnAbout(wxCommandEvent& event);
 
 private:

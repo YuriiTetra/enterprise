@@ -5,7 +5,7 @@
 
 #include "treeDataReport.h"
 #include "frontend/mainFrame/mainFrame.h"
-#include "frontend/docView/docManager.h"
+#include "frontend/docView/docView.h"
 #include "backend/appData.h"
 
 #define	objectFormsName _("Forms")
@@ -26,7 +26,7 @@ void ibDataReportTree::ActivateItem(const wxTreeItemId& item)
 	if (!m_currObject)
 		return;
 
-	OpenFormMDI(m_currObject);
+	OpenObjectForm(m_currObject);
 }
 
 ibValueMetaObject* ibDataReportTree::NewItem(const ibClassID& clsid, ibValueMetaObject* parent, bool rubObject)
@@ -48,7 +48,7 @@ ibValueMetaObject* ibDataReportTree::CreateItem(bool showValue)
 
 		ibPropertyObject* prev_selected = objectInspector->GetSelectedObject();
 
-		if (showValue) { OpenFormMDI(createdObject); }
+		if (showValue) { OpenObjectForm(createdObject); }
 		UpdateToolbar(createdObject, FillItem(createdObject, item,
 			prev_selected == objectInspector->GetSelectedObject(), false));
 		for (auto& doc : docManager->GetDocumentsVector()) {
@@ -116,7 +116,7 @@ void ibDataReportTree::EditItem()
 	if (!m_currObject)
 		return;
 
-	OpenFormMDI(m_currObject);
+	OpenObjectForm(m_currObject);
 }
 
 void ibDataReportTree::RemoveItem()
@@ -504,7 +504,12 @@ void ibDataReportTree::ActivateTree()
 void ibDataReportTree::ClearTree()
 {
 	for (auto& doc : docManager->GetDocumentsVector()) {
+		// docManager->GetDocumentsVector() now mixes ibMetaDocument
+		// instances (Catalog/Document/Form editors) with plain ibDocument
+		// (AuditLog, Text, Help) after step-4b decoupling. Skip non-meta
+		// docs — they have no metaobject to compare against this tree.
 		const ibMetaDocument* metaDoc = wxDynamicCast(doc, ibMetaDocument);
+		if (metaDoc == nullptr) continue;
 		const ibValueMetaObject* metaObject = metaDoc->GetMetaObject();
 		if (metaObject != nullptr && this == metaObject->GetMetaDataTree()) {
 			doc->DeleteAllViews();

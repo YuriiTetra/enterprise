@@ -1,37 +1,32 @@
-﻿#ifndef _CONSTANTS_MANAGER_H__
+#ifndef _CONSTANTS_MANAGER_H__
 #define _CONSTANTS_MANAGER_H__
 
 #include "constant.h"
 
 class ibValueManagerDataObjectConstant :
 	public ibValueManagerObject {
-public:
+	public:
 
-	ibValueManagerDataObjectConstant(ibValueMetaObjectConstant* metaConst = nullptr) : m_metaObject(metaConst) {}
+	ibValueManagerDataObjectConstant(ibValueMetaObjectConstant* metaConst = nullptr) : m_metaObject(metaConst) {
+		m_members.Bind(this, &ibValueManagerDataObjectConstant::FillManagerMethods);
+	}
 	virtual ~ibValueManagerDataObjectConstant() {}
 
 	virtual const ibValueMetaObjectConstant* GetMetaObject() const { return m_metaObject; }
 
-	virtual ibValueMethodHelper* GetPMethods() const {
-		//PrepareNames();  
-		return &m_methodHelper;
-	}
-
-	virtual void PrepareNames() const;
+	void FillManagerMethods(ibMemberTable& helper) const;
 	virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);
 
-	//Get ref class 
+	//Get ref class
 	virtual ibClassID GetClassType() const;
 
-	//types 
+	//types
 	virtual wxString GetClassName() const;
 	virtual wxString GetString() const;
 
 protected:
 	const ibValueMetaObjectConstant* m_metaObject;
-	static ibValueMethodHelper m_methodHelper;
 private:
-	wxDECLARE_DYNAMIC_CLASS(ibValueManagerDataObjectConstant);
 };
 
 

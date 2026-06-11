@@ -5,6 +5,7 @@
 
 #include "constant.h"
 #include "backend/metaData.h"
+#include "backend/query/queryableHooks.h"   // light L4 source registration hooks (no appData / factory include here)
 
 #define objectModule wxT("objectModule")
 
@@ -12,7 +13,6 @@
 //*                         metaData                                    * 
 //***********************************************************************
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueMetaObjectConstant, ibValueMetaObjectAttribute)
 
 //***********************************************************************
 //*                         Attributes                                  * 
@@ -107,6 +107,10 @@ bool ibValueMetaObjectConstant::OnAfterRunMetaObject(int flags)
 	if (!m_propertyModule->GetMetaObject()->OnAfterRunMetaObject(flags))
 		return false;
 
+	// Register the constant as an L4 query source (its descriptor field, holding the single-row
+	// sys_const queryable). Check the flag BEFORE registering — skip the onlyLoadFlag pass.
+	if (!(flags & onlyLoadFlag))
+		ibRegisterQueryableSource(&m_queryable);
 
 	if (auto* cc = m_metaData->GetCompileCache()) {
 
@@ -121,14 +125,21 @@ bool ibValueMetaObjectConstant::OnAfterRunMetaObject(int flags)
 
 bool ibValueMetaObjectConstant::OnBeforeCloseMetaObject()
 {
+	ibUnregisterQueryableSource(&m_queryable);
+
 	if (!m_propertyModule->GetMetaObject()->OnBeforeCloseMetaObject())
 		return false;
 
 
 	if (auto* cc = m_metaData->GetCompileCache()) {
 
-		if (cc->RemoveCompileModule(m_propertyModule->GetMetaObject()))
-			return ibValueMetaObjectAttribute::OnAfterCloseMetaObject();
+		// Run the base BEFORE-close hook in the before phase, then drop the
+		// compile-cache entry — mirror of ibValueMetaObjectCatalog and the other
+		// business types. Was OnAfterCloseMetaObject (a pre-phase-split legacy
+		// copy/paste) which fired the after-hook + metaTree->CloseMetaObject in the
+		// before phase, then again in OnAfterCloseMetaObject — double close.
+		if (ibValueMetaObjectAttribute::OnBeforeCloseMetaObject())
+			return cc->RemoveCompileModule(m_propertyModule->GetMetaObject());
 
 		return false;
 	}

@@ -7,7 +7,6 @@
 #include "backend/metaData.h"
 #include "commonObject.h"
 
-wxIMPLEMENT_DYNAMIC_CLASS(ibValueManagerDataObjectChartOfAccounts, ibValue);
 
 const ibValueMetaObjectCommonModule* ibValueManagerDataObjectChartOfAccounts::GetManagerModule() const { return m_metaObject->GetManagerModule(); }
 
@@ -31,19 +30,18 @@ enum Func {
 	eEmptyRef
 };
 
-void ibValueManagerDataObjectChartOfAccounts::PrepareNames() const
+void ibValueManagerDataObjectChartOfAccounts::FillManagerMethods(ibMemberTable& helper) const
 {
-	ibValueManagerDataObjectPredefined::PrepareNames();
-	m_methodHelper->AppendFunc(wxT("CreateElement"), wxT("CreateElement()"));
-	m_methodHelper->AppendFunc(wxT("CreateGroup"), wxT("CreateGroup()"));
-	m_methodHelper->AppendFunc(wxT("Select"), wxT("Select()"));
-	m_methodHelper->AppendFunc(wxT("FindByCode"), 1, wxT("FindByCode(code : string)"));
-	m_methodHelper->AppendFunc(wxT("FindByDescription"), 1, wxT("FindByDescription(descr : string)"));
-	m_methodHelper->AppendFunc(wxT("GetForm"), 3, wxT("GetForm(name : string, owner : any, id : guid)"));
-	m_methodHelper->AppendFunc(wxT("GetListForm"), 3, wxT("GetListForm(name : string, owner : any, id : guid)"));
-	m_methodHelper->AppendFunc(wxT("GetSelectForm"), 3, wxT("GetSelectForm(name : string, owner : any, id : guid)"));
-	m_methodHelper->AppendFunc(wxT("GetTemplate"), 1, wxT("GetTemplate(name : string)"));
-	m_methodHelper->AppendFunc(wxT("EmptyRef"), wxT("EmptyRef()"));
+	helper.AppendFunc(wxT("CreateElement"), wxT("CreateElement()"));
+	helper.AppendFunc(wxT("CreateGroup"), wxT("CreateGroup()"));
+	helper.AppendFunc(wxT("Select"), wxT("Select()"));
+	helper.AppendFunc(wxT("FindByCode"), 1, wxT("FindByCode(code : string)"));
+	helper.AppendFunc(wxT("FindByDescription"), 1, wxT("FindByDescription(descr : string)"));
+	helper.AppendFunc(wxT("GetForm"), 3, wxT("GetForm(name : string, owner : any, id : guid)"));
+	helper.AppendFunc(wxT("GetListForm"), 3, wxT("GetListForm(name : string, owner : any, id : guid)"));
+	helper.AppendFunc(wxT("GetSelectForm"), 3, wxT("GetSelectForm(name : string, owner : any, id : guid)"));
+	helper.AppendFunc(wxT("GetTemplate"), 1, wxT("GetTemplate(name : string)"));
+	helper.AppendFunc(wxT("EmptyRef"), wxT("EmptyRef()"));
 }
 
 #include "selector/objectSelector.h"
@@ -54,7 +52,7 @@ bool ibValueManagerDataObjectChartOfAccounts::CallAsFunc(const long lMethodNum, 
 	{
 	case eCreateElement: pvarRetValue = m_metaObject->CreateObjectValue(ibObjectMode::OBJECT_ITEM); return true;
 	case eCreateGroup: pvarRetValue = m_metaObject->CreateObjectValue(ibObjectMode::OBJECT_FOLDER); return true;
-	case eSelect: pvarRetValue = ibValue::CreateAndPrepareValueRef<ibValueSelectorRecordDataObject>(m_metaObject); return true;
+	case eSelect: pvarRetValue = new ibValueSelectorRecordDataObject(m_metaObject); return true;
 	case eFindByCode: pvarRetValue = FindByCode(*paParams[0]); return true;
 	case eFindByDescription: pvarRetValue = FindByDescription(*paParams[0]); return true;
 	case eGetForm: {

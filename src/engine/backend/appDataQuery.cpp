@@ -113,6 +113,56 @@ void ibApplicationData::CreateTableEvent()
 	}
 }
 
+// sys_lock — long-held pessimistic-lock coordination table (see
+// docs/record-locks.md "Planned upgrade path"). One row per held
+// lock. ibLockManager INSERTs on Acquire, DELETEs on Release / on
+// session end / on zombie sweep. Index on (namespace, keyHash) drives
+// the per-acquire conflict-check; index on sessionGuid drives the
+// session-end cascade.
+void ibApplicationData::CreateTableLock()
+{
+	if (!db_query->TableExists(lock_table)) {
+
+		db_query->RunQuery(wxT("create table %s ("
+			"lockGuid         VARCHAR(36)  NOT NULL PRIMARY KEY,"
+			"sessionGuid      VARCHAR(36)  NOT NULL,"   // owner identity (session.GUID or custom holder)
+			"namespace        VARCHAR(128) NOT NULL,"   // e.g. \"Catalog.Products\"
+			"keyHash          VARCHAR(64)  NOT NULL,"   // SHA-256 hex of canonical key bytes
+			"keyData          VARCHAR(1024),"           // canonical human-readable key for conflict messages
+			"lockMode         INTEGER      NOT NULL,"   // 0=Shared, 1=Exclusive
+			"acquiredAt       TIMESTAMP    NOT NULL,"
+			"userName         VARCHAR(128),"            // holder's display name (snapshot at acquire)
+			"computer         VARCHAR(128));"),
+			lock_table
+		);
+
+		if (db_query->GetDatabaseLayerType() != DATABASELAYER_FIREBIRD) {
+
+			db_query->RunQuery(
+				wxT("create index if not exists lock_index_1 on %s (namespace, keyHash);"),
+				lock_table
+			);
+
+			db_query->RunQuery(
+				wxT("create index if not exists lock_index_2 on %s (sessionGuid);"),
+				lock_table
+			);
+		}
+		else
+		{
+			db_query->RunQuery(
+				wxT("create index lock_index_1 on %s (namespace, keyHash);"),
+				lock_table
+			);
+
+			db_query->RunQuery(
+				wxT("create index lock_index_2 on %s (sessionGuid);"),
+				lock_table
+			);
+		}
+	}
+}
+
 // Additive column migration for sys_session. Existing databases created
 // before the session-registry refactor (pid / address / currentActivity
 // added 2026-04-20) are transparently upgraded on startup — registry
@@ -137,18 +187,18 @@ void ibApplicationData::MigrateTableSession()
 	}
 	if (!has(wxT("address"))) {
 		try { db_query->RunQuery(wxT("ALTER TABLE %s ADD address VARCHAR(256)"), session_table); }
-		catch (...) {}
+		catch (...) { /* swallowed: best-effort migration; driver may not support this DDL */ }
 	}
 	if (!has(wxT("currentActivity"))) {
 		try { db_query->RunQuery(wxT("ALTER TABLE %s ADD currentActivity VARCHAR(128)"), session_table); }
-		catch (...) {}
+		catch (...) { /* swallowed: best-effort migration; driver may not support this DDL */ }
 	}
 	if (!has(wxT("kind"))) {
 		// ibSessionKind — session-level role (WebServer=5, WebClient=100,
 		// desktop kinds share numeric values with ibRunMode). Distinct
 		// from `application` which stores process-level ibRunMode.
 		try { db_query->RunQuery(wxT("ALTER TABLE %s ADD kind INTEGER"), session_table); }
-		catch (...) {}
+		catch (...) { /* swallowed: best-effort migration; driver may not support this DDL */ }
 	}
 	if (!has(wxT("signal"))) {
 		// Admin → registry control channel. A non-empty value is picked
@@ -156,14 +206,14 @@ void ibApplicationData::MigrateTableSession()
 		// tick; the handler acts and clears the signal. "kick" is the
 		// first supported value — more (reload, refresh) may follow.
 		try { db_query->RunQuery(wxT("ALTER TABLE %s ADD signal VARCHAR(32)"), session_table); }
-		catch (...) {}
+		catch (...) { /* swallowed: best-effort migration; driver may not support this DDL */ }
 	}
 	if (!has(wxT("exclusive"))) {
 		// Process-wide monopoly mode marker. 1 = this session holds
 		// exclusive; cluster-aware gate in ProcessAdd / ProcessSetExclusive
 		// reads peer rows to detect another process holding it.
 		try { db_query->RunQuery(wxT("ALTER TABLE %s ADD exclusive INTEGER"), session_table); }
-		catch (...) {}
+		catch (...) { /* swallowed: best-effort migration; driver may not support this DDL */ }
 	}
 }
 

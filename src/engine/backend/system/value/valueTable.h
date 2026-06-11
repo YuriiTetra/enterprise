@@ -10,7 +10,7 @@ const ibClassID g_valueTableCLSID = string_to_clsid("VL_TABL");
 
 //Table support
 class BACKEND_API ibValueModelTable : public ibValueModelRamTableBase {
-	wxDECLARE_DYNAMIC_CLASS(ibValueModelTable);
+	public:
 private:
 	// methods:
 	enum Func {
@@ -28,7 +28,7 @@ private:
 	};
 public:
 	class ibValueModelTableColumnCollection : public ibValueModelTableBase::ibValueModelColumnCollection {
-		wxDECLARE_DYNAMIC_CLASS(ibValueModelTableColumnCollection);
+	public:
 	private:
 		enum Func {
 			enAddColumn = 0,
@@ -37,7 +37,7 @@ public:
 	public:
 
 		class ibValueModelTableColumnInfo : public ibValueModelTableBase::ibValueModelColumnCollection::ibValueModelColumnInfo {
-			wxDECLARE_DYNAMIC_CLASS(ibValueModelTableColumnInfo);
+	public:
 		private:
 
 			unsigned int m_columnID;
@@ -91,7 +91,7 @@ public:
 			}
 
 			return m_listColumnInfo.emplace_back(
-				ibValue::CreateAndPrepareValueRef<ibValueModelTableColumnInfo>(max_id + 1, colName, typeData, caption, width));
+				new ibValueModelTableColumnInfo(max_id + 1, colName, typeData, caption, width));
 		}
 
 		const ibTypeDescription GetColumnType(unsigned int col) const {
@@ -130,19 +130,13 @@ public:
 
 		virtual unsigned int GetColumnCount() const { return m_listColumnInfo.size(); }
 
-		virtual ibValueMethodHelper* GetPMethods() const {
-			//PrepareNames();
-			return m_methodHelper;
-		}
-
-		virtual void PrepareNames() const;
-
+		void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 		//WORK AS AN AGGREGATE OBJECT
 		virtual bool CallAsProc(const long lMethodNum, ibValue** paParams, const long lSizeArray);
 		virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);
 
-		//array support 
+		//array support
 		virtual bool SetAt(const ibValue& varKeyValue, const ibValue& varValue);
 		virtual bool GetAt(const ibValue& varKeyValue, ibValue& pvarValue);
 
@@ -152,11 +146,9 @@ public:
 
 		ibValueModelTable* m_ownerTable;
 		std::vector<ibValuePtr<ibValueModelTableColumnInfo>> m_listColumnInfo;
-		ibValueMethodHelper* m_methodHelper;
 	};
 
 	class ibValueModelTableReturnLine : public ibValueModelReturnLine {
-		wxDECLARE_DYNAMIC_CLASS(ibValueModelTableReturnLine);
 	public:
 
 		ibValueModelTableReturnLine(ibValueModelTable* ownerTable = nullptr, const ibDataViewItem& line = ibDataViewItem(nullptr));
@@ -164,19 +156,13 @@ public:
 
 		virtual ibValueModelTableBase* GetOwnerModel() const { return m_ownerTable; }
 
-		virtual ibValueMethodHelper* GetPMethods() const {
-			//PrepareNames();
-			return m_methodHelper;
-		}
-
-		virtual void PrepareNames() const; // this method is automatically called to initialize attribute and method names.
+		void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 		virtual bool SetPropVal(const long lPropNum, const ibValue& varPropVal); //setting attribute
 		virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal); //attribute value
 
 	private:
 		ibValueModelTable* m_ownerTable;
-		ibValueMethodHelper* m_methodHelper;
 	};
 
 public:
@@ -190,7 +176,7 @@ public:
 	virtual ibValueModelTableReturnLine* GetRowAt(const long& line) {
 		if (line > GetRowCount())
 			return nullptr;
-		return ibValue::CreateAndPrepareValueRef<ibValueModelTableReturnLine>(this, GetItem(line));
+		return new ibValueModelTableReturnLine(this, GetItem(line));
 	}
 
 	virtual ibValueModelReturnLine* GetRowAt(const ibDataViewItem& line) {
@@ -235,12 +221,7 @@ public:
 	//check is empty
 	virtual bool IsEmpty() const { return GetRowCount() == 0; }
 
-	virtual ibValueMethodHelper* GetPMethods() const {  // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames();
-		return &m_methodHelper;
-	}
-
-	virtual void PrepareNames() const; // this method is automatically called to initialize attribute and method names.
+	void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 	virtual bool GetPropVal(const long lPropNum, ibValue& pvarPropVal); // attribute value
 	virtual bool CallAsFunc(const long lMethodNum, ibValue& pvarRetValue, ibValue** paParams, const long lSizeArray);       // method call
@@ -257,7 +238,7 @@ public:
 	void EditRow();
 	void DeleteRow();
 
-	ibValueModelTable* Clone() { return ibValue::CreateAndPrepareValueRef<ibValueModelTable>(*this); }
+	ibValueModelTable* Clone() { return new ibValueModelTable(*this); }
 	unsigned int Count() { return GetRowCount(); }
 	void Clear();
 
@@ -277,13 +258,12 @@ public:
 	// in batches. GetEmptyRow yields the typed skeleton for the
 	// IntelliSense type hint that the iterator state surfaces.
 	virtual ibValue GetEmptyRow() override {
-		return ibValue::CreateAndPrepareValueRef<ibValueModelTableReturnLine>(this, ibDataViewItem(nullptr));
+		return new ibValueModelTableReturnLine(this, ibDataViewItem(nullptr));
 	}
 
 private:
 
 	ibValuePtr<ibValueModelTableColumnCollection> m_tableColumnCollection;
-	static ibValueMethodHelper m_methodHelper;
 };
 
 #endif

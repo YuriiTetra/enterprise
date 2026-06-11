@@ -1,5 +1,12 @@
 # Backend / frontend DLL split — architecture review
 
+> **Status:** REVIEW / OBSERVATION (not a refactor arc). Describes the
+> current backend / frontend interface (`ibBackendDocFrame` +
+> siblings), lists known design smells, and points at the refactors
+> that would pay off later. No active implementation; pick up when
+> a third frontend (mobile / native) or the compute-server tiering
+> plan creates concrete pressure.
+
 This doc reviews the mechanism that keeps `backend.dll` UI-agnostic
 while letting `frontend.dll` (desktop wx) or `wfrontend.dll` (web,
 `OES_USE_WEB`) provide the concrete UI. The linchpin is
@@ -82,8 +89,8 @@ has no equivalent.
 
 ## What works
 
-- **backend.dll is truly UI-free.** `daemon.exe`, `codeRunner.exe`,
-  `classChecker.exe` link backend without dragging in wx. The
+- **backend.dll is truly UI-free.** `daemon.exe` and `codeRunner.exe`
+  link backend without dragging in wx. The
   pattern has proven itself over years of desktop operation.
 - **Swapping frontend is cheap.** `wfrontend.dll` replacing
   `frontend.dll` was possible largely because this interface was

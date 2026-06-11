@@ -17,16 +17,18 @@ class BACKEND_API ibValueRecordDataObjectRef;
 
 //********************************************************************************************
 
-class BACKEND_API ibValueReferenceDataObject : public ibValue,
+class BACKEND_API ibValueReferenceDataObject : public ibValueDynamicMembers,
 	public ibValueDataObject {
-	wxDECLARE_DYNAMIC_CLASS(ibValueReferenceDataObject);
+	public:
 private:
 	enum helperAlias {
 		eProperty,
 		eTable
 	};
 private:
-	ibValueReferenceDataObject() : ibValue(ibValueTypes::TYPE_VALUE, true), m_initializedRef(false) {}
+	ibValueReferenceDataObject() : ibValueDynamicMembers(ibValueTypes::TYPE_VALUE, true), m_initializedRef(false) {
+		m_members.Bind(this, &ibValueReferenceDataObject::FillMembers);
+	}
 	ibValueReferenceDataObject(const ibValueMetaObjectRecordDataRef* metaObject, const ibGuid& objGuid = wxNullGuid);
 public:
 
@@ -34,16 +36,26 @@ public:
 		return m_reference_impl;
 	}
 
+	// Identity key by the target's guid (not the display string) — see ibValue::GetHashKey.
+	virtual wxString GetHashKey() const override { return wxString(GetGuid()); }
+
 	void PrepareRef(bool createData = true);
 
 	virtual ~ibValueReferenceDataObject();
 
-	static ibValueReferenceDataObject* Create(ibMetaData* metaData, const ibMetaID& id, const ibGuid& objGuid = wxNullGuid);
+	static ibValueReferenceDataObject* Create(const ibMetaData* metaData, const ibMetaID& id, const ibGuid& objGuid = wxNullGuid);
 	static ibValueReferenceDataObject* Create(const ibValueMetaObjectRecordDataRef* metaObject, const ibGuid& objGuid = wxNullGuid);
 
-	static ibValueReferenceDataObject* Create(ibMetaData* metaData, void* ptr);
-	static ibValueReferenceDataObject* CreateFromPtr(ibMetaData* metaData, void* ptr);
-	static ibValueReferenceDataObject* CreateFromResultSet(class ibDatabaseResultSet *rs, const ibValueMetaObjectRecordDataRef* metaObject, const ibGuid& refGuid);
+	// Like Create(metaObject, guid) but WITHOUT the PrepareRef call. The
+	// value-ctor registry path (ibCtorMetaValueTypeReference::CreateObject)
+	// must use this: PrepareRef there recurses — it materialises the
+	// reference's attribute values, one of which is itself a reference,
+	// re-entering CreateObject -> stack overflow. PrepareRef runs later, on
+	// first real use. (Member, so it reaches the private ctor.)
+	static ibValueReferenceDataObject* CreateRaw(const ibValueMetaObjectRecordDataRef* metaObject, const ibGuid& objGuid = wxNullGuid);
+
+	static ibValueReferenceDataObject* Create(const ibMetaData* metaData, void* ptr);
+	static ibValueReferenceDataObject* CreateFromPtr(const ibMetaData* metaData, void* ptr);
 
 	//operator '>'
 	virtual bool CompareValueGT(const ibValue& cParam) const {
@@ -130,11 +142,7 @@ public:
 	//*                              Support methods                             *
 	//****************************************************************************
 
-	virtual ibValueMethodHelper* GetPMethods() const { // get a reference to the class helper for parsing attribute and method names
-		//PrepareNames(); 
-		return m_methodHelper;
-	}
-	virtual void PrepareNames() const;
+	void FillMembers(ibMemberTable& helper) const;   // bound in ctor (was PrepareNames)
 
 	//****************************************************************************
 	//*                              Override attribute                          *
@@ -164,7 +172,6 @@ protected:
 
 	bool m_initializedRef;
 
-	ibValueMethodHelper* m_methodHelper;
 	const ibValueMetaObjectRecordDataRef* m_metaObject;
 	ibReference* m_reference_impl;
 

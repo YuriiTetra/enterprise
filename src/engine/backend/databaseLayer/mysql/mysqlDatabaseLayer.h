@@ -70,6 +70,14 @@ public:
 	virtual bool TryProbeRowLock(const wxString& tableName,
 		const wxString& pkColumn, const wxString& pkValue) override;
 
+	// Write-time row-lock dialect (see docs/record-locks.md). MySQL/
+	// InnoDB locks via "SELECT ... FOR UPDATE"; "NOWAIT" is honoured on
+	// MySQL 8+. Older versions ignore the keyword and rely on the
+	// session-level `innodb_lock_wait_timeout=1` already plumbed via
+	// ibTxOptions::noWait — both paths fail fast under contention.
+	wxString RowLockHint() const override { return wxT("FOR UPDATE"); }
+	wxString NoWaitClause() const override { return wxT("NOWAIT"); }
+
 	// Database schema API contributed by M. Szeftel (author of wxActiveRecordGenerator)
 	virtual bool TableExists(const wxString& table);
 	virtual bool ViewExists(const wxString& view);
@@ -81,8 +89,23 @@ public:
 		return DATABASELAYER_MYSQL;
 	}
 
+	static const ibDialectDictionary& Dialect();                       // MySQL dialect (no instance needed)
+	virtual const ibDialectDictionary& GetDialect() const override;    // polymorphic access for L2
+
 	static int TranslateErrorCode(int nCode);
 	static bool IsAvailable();
+
+	// Map a MySQL errno (as returned by mysql_errno()) to a portable
+	// Kind. Common codes:
+	//   1213 = ER_LOCK_DEADLOCK     → Deadlock
+	//   1205 = ER_LOCK_WAIT_TIMEOUT → Timeout
+	//   1062 = ER_DUP_ENTRY         → Constraint
+	//   1452 = ER_NO_REFERENCED_ROW → Constraint
+	//   1064 = ER_PARSE_ERROR       → Syntax
+	//   2002 = CR_CONNECTION_ERROR  → ConnectionLost
+	//   2006 = CR_SERVER_GONE_ERROR → ConnectionLost
+	//   2013 = CR_SERVER_LOST       → ConnectionLost
+	ibBackendDatabaseException::Kind ClassifyDatabaseError(int nativeCode) const override;
 
 protected:
 

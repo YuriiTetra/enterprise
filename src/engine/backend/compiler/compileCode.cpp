@@ -5,6 +5,7 @@
 
 #include "compileCode.h"
 #include "codeDef.h"
+#include "lambdaQueryAst.h"   // L4-2 — lambda body -> L4 query AST (pushdown)
 
 #include "system/systemManager.h"
 #include "backend/guid.h"  // wxNewUniqueGuid for anonymous-lambda synthetic naming
@@ -166,6 +167,14 @@ void ibCompileCode::PrepareModuleData()
 		});
 	}
 
+	// Pass 1b: local binds — plain frame locals (bExport=false, NO m_bExternal /
+	// m_bContext stamp → kind=Local). The binder fills the slot at runtime (no
+	// required/type pre-flight); the module reads/writes it as a normal local
+	// (e.g. a constant's Value backed by &m_constValue).
+	for (auto& localValue : m_listLocalValue) {
+		m_rootContext->AddVariable(localValue.first, wxEmptyString, false);
+	}
+
 	// Pass 2: context values — currently all self-referencing.
 	// Stamp scoped (per-instance "self" handles like ThisForm) and
 	// clsid onto the compile-context entry; the bc mirror then carries
@@ -175,12 +184,12 @@ void ibCompileCode::PrepareModuleData()
 		m_rootContext->AddVariable(contextValue.first, wxEmptyString, true, true);
 		bool scoped = false;
 		ibClassID clsid = 0;
-		if (contextValue.second) {
-			contextValue.second->PrepareNames();
-			clsid = contextValue.second->GetClassType();
-			const long selfPropIdx = contextValue.second->FindProp(contextValue.first);
+		if (contextValue.second.m_value) {
+			contextValue.second.m_value->InvalidateNames();
+			clsid = contextValue.second.m_value->GetClassType();
+			const long selfPropIdx = contextValue.second.m_value->FindProp(contextValue.first);
 			if (selfPropIdx >= 0)
-				scoped = contextValue.second->IsPropScoped(selfPropIdx);
+				scoped = contextValue.second.m_value->IsPropScoped(selfPropIdx);
 		}
 		stampOnContext(contextValue.first, [&](ibCompileContext::ibVariable& v) {
 			v.m_clsid = clsid;
@@ -192,9 +201,9 @@ void ibCompileCode::PrepareModuleData()
 
 	for (auto& pair : m_listContextValue) {
 
-		ibValue* contextValue = pair.second;
+		ibValue* contextValue = pair.second.m_value;
 		wxASSERT(contextValue);
-		contextValue->PrepareNames();
+		contextValue->InvalidateNames();
 
 		// adding variables from context
 		for (unsigned int i = 0; i < contextValue->GetNProps(); i++) {
@@ -212,8 +221,8 @@ void ibCompileCode::PrepareModuleData()
 				continue;
 			mainContext->PushVariable(propName, pair.first, i);
 			// Non-self per-instance handles (Controls / DataSource of
-			// ThisForm; RegisterRecords of ThisObject) — flag scoped
-			// from helper.
+			// ThisForm) — flag scoped from helper. (RegisterRecords of a
+			// document is EXPORTED, not scoped — see documentObject.cpp.)
 			if (contextValue->IsPropScoped(i)) {
 				auto pushed = std::find_if(mainContext->m_listVariable.begin(), mainContext->m_listVariable.end(),
 					[&propName](const auto& kv) { return stringUtils::CompareString(propName, kv.first); });
@@ -507,7 +516,7 @@ wxString ibCompileCode::GETIdentifier(bool strRealName, bool acceptKeyword)
 	}
 
 	if (strRealName) {
-		return lex.m_valData.m_sData;
+		return lex.m_valData.GetString();
 	}
 
 	return lex.m_strData;
@@ -582,7 +591,7 @@ void ibCompileCode::AddVariable(const wxString& strVarName, const ibValue& vObje
 		return;
 
 	// take into account external variables during compilation
-	m_listExternValue[strVarName] = vObject.m_typeClass == ibValueTypes::TYPE_REFFER
+	m_listExternValue[strVarName] = vObject.IsReference()
 		? vObject.GetRef() : const_cast<ibValue*>(&vObject);
 
 	//set the flag for recompilation
@@ -613,13 +622,15 @@ void ibCompileCode::AddVariable(const wxString& strVarName, ibValue* pValue)
  * Add the name and address of an external variable to a special array for later use
  */
 
-void ibCompileCode::AddContextVariable(const wxString& strVarName, const ibValue& vObject)
+void ibCompileCode::AddContextVariable(const wxString& strVarName, const ibValue& vObject, bool scopeContext)
 {
 	if (strVarName.IsEmpty())
 		return;
 
 	//adding variables from context
-	m_listContextValue[strVarName] = vObject.m_typeClass == ibValueTypes::TYPE_REFFER ? vObject.GetRef() : const_cast<ibValue*>(&vObject);
+	m_listContextValue[strVarName] = {
+		vObject.IsReference() ? vObject.GetRef() : const_cast<ibValue*>(&vObject),
+		scopeContext };  // {m_value, m_scopeContext}
 
 	//set the flag for recompilation
 	m_changedCode = true;
@@ -631,15 +642,27 @@ void ibCompileCode::AddContextVariable(const wxString& strVarName, const ibValue
  * Add the name and address of an external variable to a special array for later use
  */
 
-void ibCompileCode::AddContextVariable(const wxString& strVarName, ibValue* pValue)
+void ibCompileCode::AddContextVariable(const wxString& strVarName, ibValue* pValue, bool scopeContext)
 {
 	if (strVarName.IsEmpty())
 		return;
 
 	//adding variables from context
-	m_listContextValue[strVarName] = pValue;
+	m_listContextValue[strVarName] = { pValue, scopeContext };
 
 	//set the flag for recompilation
+	m_changedCode = true;
+}
+
+// Bound LOCAL — the name resolves to a plain frame local (kind=Local), but the
+// binder fills its slot at init with pValue. The module body reads/writes it as a
+// normal local (e.g. a constant's Value, backed by &m_constValue).
+void ibCompileCode::AddLocalVariable(const wxString& strVarName, ibValue* pValue)
+{
+	if (strVarName.IsEmpty())
+		return;
+
+	m_listLocalValue[strVarName] = pValue;
 	m_changedCode = true;
 }
 
@@ -1071,8 +1094,13 @@ bool ibCompileCode::CompileModule()
 
 	// Mark constants read-only — constants are immutable post-compile;
 	// runtime writes through them would corrupt the constant pool.
-	// Done once at compile finalize so Execute doesn't have to mutate
-	// bytecode (bc is a const template at runtime).
+	// MUST be a finalize sweep, NOT stamped at insertion (GetConstString /
+	// FindConst): ibValue's move ctor resets m_bReadOnly to false
+	// (value.cpp:73), so a flag set on insert is wiped when a later
+	// emplace_back grows the vector and move-constructs the earlier entries.
+	// Only after the pool stops reallocating is the flag stable. The eval
+	// path (ibProcUnit::CompileExpression) carries its own copy of this
+	// sweep for the same reason — keep them in sync.
 	for (auto& c : m_cByteCode.m_listConst)
 		c.m_bReadOnly = true;
 
@@ -1584,6 +1612,10 @@ ibParamUnit ibCompileCode::CompileLambdaExpression(ibCompileContext* context)
 	// eager walk here: ctxs that nothing captures from stay unmarked
 	// regardless of how many lambdas they enclose.
 
+	// L4-2 pushdown — the body's lexeme span starts right after the signature
+	// (captured BEFORE EmitFunctionBody consumes it); the recorder re-reads
+	// exactly this span once the body has compiled (see below).
+	const size_t lambdaBodyFrom = m_numCurrentCompile + 1;
 
 	// Emit OPER_LFUNC + params + body + OPER_ENDLFUNC inline.
 	// EmitFunctionBody discriminates lambda vs named via
@@ -1625,6 +1657,18 @@ ibParamUnit ibCompileCode::CompileLambdaExpression(ibCompileContext* context)
 	lfuncCode.m_param1 = target;
 	lfuncCode.m_param2.m_numIndex = endlfuncIp;
 	lfuncCode.m_param3.m_numIndex = funcIndex;
+
+	// L4-2 pushdown — record the just-compiled body as the L4 query AST when
+	// it is a single-parameter, single-expression lambda in the translatable
+	// subset (compiler/lambdaQueryAst.*). Null = the pipeline stays in
+	// RAM; the recorder never fails the compile. The span [lambdaBodyFrom,
+	// m_numCurrentCompile] covers everything EmitFunctionBody consumed,
+	// including the closing fence the recorder tolerates.
+	if (funcIndex >= 0 && createdFunction->m_listParam.size() == 1) {
+		m_cByteCode.m_listFunc[funcIndex].m_lambdaExprAst = ibBuildLambdaQueryAst(
+			m_listLexem, lambdaBodyFrom, m_numCurrentCompile + 1,
+			createdFunction->m_listParam[0].m_strName);
+	}
 
 	// NOTE: ibParamUnit::m_numIndex is wxLongLong_t (8 bytes) — cast to int
 	// for %d, otherwise variadic packs 8 bytes and the next arg (caller_ctx)
@@ -3582,37 +3626,60 @@ ibParamUnit ibCompileCode::GetCurrentIdentifier(ibCompileContext* context, int& 
 	else { //this is a variable call
 		std::shared_ptr<ibCompileContext::ibVariable> foundedVar = nullptr; numIsSet = 1;
 
-		// Kind-aware identifier resolve. Three outcomes:
-		//   - ContextProp (Catalogs of Manager) — m_strContext set on the
-		//     resolved entry → emit OPER_GET_A / OPER_SET_A on the parent
-		//     binding + prop name const.
-		//   - bare binding (ThisForm) or regular var — fall through to
-		//     GetVariable's frame-slot emission (handles Local / Context
-		//     bindings uniformly via the compile-context's slot table).
-		//   - not found — GetVariable also covers the auto-add path.
-		const bool isContextProp =
-			m_rootContext->FindVariable(strRealName, foundedVar, true) &&
-			foundedVar && !foundedVar->m_strContext.IsEmpty();
+		// Kind-aware identifier resolve — promote the bind-kind to a dedicated
+		// access opcode (1:1 with Bind{Context,Scope,Export}Variable):
+		//   - ContextProp (Catalogs of a Manager scope) → OPER_GET_SCOPE /
+		//     OPER_SET_SCOPE on the parent (scope-provider) binding + member const.
+		//   - External binding (RegisterRecords / Filter / Controls / DataSource)
+		//     → OPER_GET_EXTERN / OPER_SET_EXTERN on the handle's slot.
+		//   - Context binding (ThisObject / ThisForm) → OPER_GET_CONTEXT /
+		//     OPER_SET_CONTEXT on the handle's slot.
+		//   - regular var / not found → GetVariable's frame-slot emission.
+		m_rootContext->FindVariable(strRealName, foundedVar, true);
+		const bool isScope   = foundedVar && !foundedVar->m_strContext.IsEmpty();
+		const bool isExtern  = foundedVar && foundedVar->m_strContext.IsEmpty() && foundedVar->m_bExternal;
+		const bool isContext = foundedVar && foundedVar->m_strContext.IsEmpty() && foundedVar->m_bContext && !foundedVar->m_bExternal;
 
-		if (isContextProp) {
+		if (isScope) {
 			ibByteUnit code;
 			AddLineInfo(code);
 			const int numConst = GetConstString(strRealName);
 			if (IsNextDelimeter('=') && numPrevSet == 1) {
 				GETDelimeter('='); numIsSet = 0;
-				code.m_numOper = OPER_SET_A;
-				code.m_param1 = context->GetVariable(foundedVar->m_strContext, true, false, true);//variable for which the attribute is called
-				code.m_param2.m_numIndex = numConst;//number of the called method from the list of encountered attributes and methods
+				code.m_numOper = OPER_SET_SCOPE;
+				code.m_param1 = context->GetVariable(foundedVar->m_strContext, true, false, true);//scope-provider binding
+				code.m_param2.m_numIndex = numConst;//member name const index
 				code.m_param3 = GetExpression(context);
 				m_cByteCode.m_listCode.emplace_back(std::move(code));
 				return variable;
 			}
 			else {
-				code.m_numOper = OPER_GET_A;
-				code.m_param2 = context->GetVariable(foundedVar->m_strContext, true, false, true);//variable for which the attribute is called
-				code.m_param3.m_numIndex = numConst;//number of the attribute to be called from the list of attributes and methods encountered
+				code.m_numOper = OPER_GET_SCOPE;
+				code.m_param2 = context->GetVariable(foundedVar->m_strContext, true, false, true);//scope-provider binding
+				code.m_param3.m_numIndex = numConst;//member name const index
 				variable = context->CreateVariable();
-				code.m_param1 = variable;// variable into which the value is returned
+				code.m_param1 = variable;// dest temp
+				m_cByteCode.m_listCode.emplace_back(std::move(code));
+			}
+		}
+		else if (isExtern || isContext) {
+			ibByteUnit code;
+			AddLineInfo(code);
+			const long getOp = isExtern ? OPER_GET_EXTERN : OPER_GET_CONTEXT;
+			const long setOp = isExtern ? OPER_SET_EXTERN : OPER_SET_CONTEXT;
+			if (IsNextDelimeter('=') && numPrevSet == 1) {
+				GETDelimeter('='); numIsSet = 0;
+				code.m_numOper = setOp;
+				code.m_param1 = context->GetVariable(strRealName, true, false);//handle slot
+				code.m_param3 = GetExpression(context);
+				m_cByteCode.m_listCode.emplace_back(std::move(code));
+				return variable;
+			}
+			else {
+				code.m_numOper = getOp;
+				code.m_param2 = context->GetVariable(strRealName, true, false);//handle slot
+				variable = context->CreateVariable();
+				code.m_param1 = variable;// dest temp
 				m_cByteCode.m_listCode.emplace_back(std::move(code));
 			}
 		}
@@ -4166,7 +4233,15 @@ ibParamUnit ibCompileCode::GetCallFunction(ibCompileContext* context, const wxSt
 	(void)GetFunction(callFunc->m_strName, foundedFunc);
 
 
-	if (foundedFunc != nullptr && m_strCurFuncName != callFunc->m_strName) {
+	// Case-insensitive: m_strCurFuncName holds the function's source-case name
+	// ("Fact"), callFunc->m_strName is upper-cased ("FACT"). A case-sensitive
+	// `!=` mis-classifies a self-call as a non-recursive call, takes the
+	// immediate PushCallFunction path, and emits OPER_CALL with the frame size
+	// (param3 = m_lVarCount) still 0 — the count isn't known until AFTER the
+	// body compiles (it includes the temps created during it). The whole point
+	// of deferring a self-call to m_listCallFunc is to resolve it at finalize
+	// once the count is settled, so the recursive frame is sized correctly.
+	if (foundedFunc != nullptr && !stringUtils::CompareString(m_strCurFuncName, callFunc->m_strName)) {
 
 		if (!PushCallFunction(callFunc))
 			return ibParamUnit();

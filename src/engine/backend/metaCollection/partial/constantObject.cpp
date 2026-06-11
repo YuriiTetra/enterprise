@@ -1,4 +1,4 @@
-﻿////////////////////////////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////
 //	Author		: Maxim Kornienko
 //	Description : constants - db
 ////////////////////////////////////////////////////////////////////////////
@@ -10,6 +10,22 @@
 #include "backend/appData.h"
 #include "backend/databaseLayer/connectionPool.h"
 #include "backend/session/session.h"
+#include "backend/lock/lockManager.h"
+
+// --- vended queryable — the constant's single-row (sys_const) table navigation ---
+// The constant is the queryable's only column AND its one-row table; resolution by
+// name / id yields the constant itself (m_meta), the value comes via GetValueAttribute.
+const ibBackendQueryColumn* ibConstantQueryable::ResolveColumnByName(const wxString& name) const { return name == m_meta->GetName() ? m_meta : nullptr; }   // the constant IS its one column
+wxString ibConstantQueryable::GetQueryTableName() const { return m_meta->GetTableNameDB(); }
+ibMetaID ibConstantQueryable::GetQueryMetaID() const { return m_meta->GetMetaID(); }
+const ibMetaData* ibConstantQueryable::GetMetaData() const { return m_meta->GetMetaData(); }
+std::vector<ibQuerySortItem> ibConstantQueryable::GetIdentitySort() const { return {}; }   // single row — no keyset
+std::vector<const ibBackendQueryColumn*> ibConstantQueryable::GetPrimaryKeyColumns() const {
+	// The single-row sys_const key (UPSERT match) — a RAW column, no metadata translation.
+	static const ibRawDBColumn s_recordKey(wxT("RECORD_KEY"), ibRawDBColumn::RawType::String);
+	return { &s_recordKey };
+}
+// (value materialisation moved to ibDbTableProvider — the queryable names no attribute / L1.)
 
 //***********************************************************************
 //*                           constant value                            *
@@ -20,10 +36,10 @@ ibValueRecordDataObjectConstant* ibValueMetaObjectConstant::CreateRecordDataObje
 	ibValueRecordDataObjectConstant* pDataRef = nullptr;
 	if (auto* cc = m_metaData->GetCompileCache()) {
 		if (!cc->FindCompileModule(m_propertyModule->GetMetaObject(), pDataRef))
-			return ibValue::CreateAndPrepareValueRef<ibValueRecordDataObjectConstant>(this);
+			return new ibValueRecordDataObjectConstant(this);
 	}
 	else {
-		pDataRef = ibValue::CreateAndPrepareValueRef<ibValueRecordDataObjectConstant>(this);
+		pDataRef = new ibValueRecordDataObjectConstant(this);
 	}
 
 	return pDataRef;
@@ -35,8 +51,7 @@ ibValueRecordDataObjectConstant* ibValueMetaObjectConstant::CreateRecordDataObje
 
 bool ibValueRecordDataObjectConstant::InitializeObject(const ibValueRecordDataObjectConstant* source)
 {
-	ibSession* session = ibSession::Current();
-	ibValueModuleManager* moduleManager = session ? session->GetManagerModule() : nullptr;
+	ibValueModuleManager* moduleManager = ibSession::EditModuleManagerFor(m_metaObject->GetMetaData());
 	wxASSERT(moduleManager);
 
 	// Descriptor parent first — subsequent BindVariable /
@@ -44,6 +59,12 @@ bool ibValueRecordDataObjectConstant::InitializeObject(const ibValueRecordDataOb
 	// after-fact cascade needed.
 	ibRuntimeModuleDataObject::SetParent(moduleManager);
 	BindContextVariable(wxT("ThisObject"), this);
+	// Constant's Value (Значение) is the module's own writable local — the
+	// binder seeds the frame slot with &m_constValue, so `Value` / `Value = …`
+	// inside the constant module read/write the backing member directly. No
+	// AppendProp + eSystem GetPropVal/SetPropVal round-trip. The address is
+	// stable (member); the value is filled by GetConstValue() just below.
+	BindLocalVariable(wxT("Value"), &m_constValue);
 
 	try {
 		m_constValue = GetConstValue();
@@ -65,26 +86,26 @@ bool ibValueRecordDataObjectConstant::InitializeObject(const ibValueRecordDataOb
 	};
 	Run(true);
 
-	PrepareNames();
 	//is Ok
 	return true;
 }
 
 ibValueRecordDataObjectConstant::ibValueRecordDataObjectConstant(const ibValueMetaObjectConstant* metaObject)
-	: m_metaObject(metaObject), m_objModified(false), m_methodHelper(new ibValueMethodHelper())
+	: ibValueDynamicMembers(ibValueTypes::TYPE_EMPTY), ibRuntimeModuleDataObject(m_members, this),
+	m_metaObject(metaObject), m_objModified(false)
 {
 	InitializeObject();
 }
 
 ibValueRecordDataObjectConstant::ibValueRecordDataObjectConstant(const ibValueRecordDataObjectConstant& source)
-	: m_metaObject(source.m_metaObject), m_objModified(false), m_methodHelper(new ibValueMethodHelper())
+	: ibValueDynamicMembers(ibValueTypes::TYPE_EMPTY), ibRuntimeModuleDataObject(m_members, this),
+	m_metaObject(source.m_metaObject), m_objModified(false)
 {
 	InitializeObject(&source);
 }
 
 ibValueRecordDataObjectConstant::~ibValueRecordDataObjectConstant()
 {
-	wxDELETE(m_methodHelper);
 }
 
 ibBackendValueForm* ibValueRecordDataObjectConstant::GetForm() const
@@ -206,19 +227,9 @@ bool ibValueRecordDataObjectConstant::GetValueByMetaID(const ibMetaID& id, ibVal
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-void ibValueRecordDataObjectConstant::PrepareNames() const
-{
-	m_methodHelper->ClearHelper();
-	m_methodHelper->AppendProp(wxT("Value"),
-		true, true, eValue, eSystem
-	);
-
-	ExportNamesToHelper(m_methodHelper, eProcUnit);
-}
-
 bool ibValueRecordDataObjectConstant::SetPropVal(const long lPropNum, const ibValue& varPropVal)
 {
-	const long lPropAlias = m_methodHelper->GetPropAlias(lPropNum);
+	const long lPropAlias = m_members.GetPropAlias(lPropNum);
 	if (lPropAlias == eProcUnit) {
 		if (m_procUnit != nullptr) {
 			return m_procUnit->SetPropVal(
@@ -226,16 +237,12 @@ bool ibValueRecordDataObjectConstant::SetPropVal(const long lPropNum, const ibVa
 			);
 		}
 	}
-	else if (lPropAlias == eSystem) {
-		m_constValue = varPropVal;
-		return true;
-	}
 	return false;
 }
 
 bool ibValueRecordDataObjectConstant::GetPropVal(const long lPropNum, ibValue& pvarPropVal)
 {
-	const long lPropAlias = m_methodHelper->GetPropAlias(lPropNum);
+	const long lPropAlias = m_members.GetPropAlias(lPropNum);
 	if (lPropAlias == eProcUnit) {
 		if (m_procUnit != nullptr) {
 			return m_procUnit->GetPropVal(
@@ -243,20 +250,13 @@ bool ibValueRecordDataObjectConstant::GetPropVal(const long lPropNum, ibValue& p
 			);
 		}
 	}
-	else if (lPropAlias == eSystem) {
-		switch (m_methodHelper->GetPropData(lPropNum))
-		{
-		case eValue:
-			pvarPropVal = m_constValue;
-			return true;
-		}
-	}
 	return false;
 }
 
 /////////////////////////////////////////////////////////////////////////////////////////////////////
 
-#include "backend/databaseLayer/databaseLayer.h"
+#include "backend/databaseLayer/databaseLayer.h"            // GetConstValue: single-row read (constant is not an ibBackendQueryable)
+#include "backend/query/dataQueryBuilder.h"                 // SetConstValue: L3 write core (UPSERT the singleton row)
 
 ibValue ibValueRecordDataObjectConstant::GetConstValue() const
 {
@@ -275,25 +275,23 @@ ibValue ibValueRecordDataObjectConstant::GetConstValue() const
 		}
 
 		const wxString& tableName = m_metaObject->GetTableNameDB();
-		const wxString& fieldName = m_metaObject->GetFieldNameDB();
 		if (db_query->TableExists(tableName)) {
-			ibDatabaseResultSet* resultSet = nullptr;
-			if (db_query->GetDatabaseLayerType() != DATABASELAYER_FIREBIRD)
-				resultSet = db_query->RunQueryWithResults("SELECT %s FROM %s LIMIT 1", ibValueMetaObjectAttributeBase::GetSQLFieldName(m_metaObject), tableName);
-			else
-				resultSet = db_query->RunQueryWithResults("SELECT FIRST 1 %s FROM %s", ibValueMetaObjectAttributeBase::GetSQLFieldName(m_metaObject), tableName);
-			if (resultSet == nullptr)
-				return ret;
-			if (resultSet->Next()) {
-				if (ibValueMetaObjectAttributeBase::GetValueAttribute(m_metaObject, ret, resultSet))
-					ret = m_metaObject->AdjustValue(ret);
+			// Read the single sys_const row through the L3 door — the constant IS the
+			// queryable (its table) AND the column (its value). The FB FIRST / others
+			// LIMIT fork and the raw field concat are gone; the value comes from the
+			// L3 selection (GetValue), then AdjustValue as before.
+			try {
+				ibDataQueryBuilder q;
+				q.From(m_metaObject->GetQueryable());
+				ibReadPageRequest page;
+				page.m_count = 1;
+				ibDataQueryResult selection = q.Execute(page);
+				if (selection.Next())
+					ret = m_metaObject->AdjustValue(selection.GetValue(m_metaObject));
 				else
 					ret = m_metaObject->CreateValue();
 			}
-			else {
-				ret = m_metaObject->CreateValue();
-			}
-			db_query->CloseResultSet(resultSet);
+			catch (...) {}
 		}
 	}
 	else {
@@ -304,6 +302,22 @@ ibValue ibValueRecordDataObjectConstant::GetConstValue() const
 }
 
 #include "backend/databaseLayer/databaseErrorCodes.h"
+
+bool ibValueRecordDataObjectConstant::TryAcquireFormLock(ibLockMode mode)
+{
+	if (m_formLockHandle.IsValid()) return true;   // already held
+
+	// Constant is one row globally — namespace IS the key, no per-row
+	// sub-identifier. ForNamespace encapsulates the empty-keyFields
+	// shape so call sites stay clean.
+	auto* lm = ibApplicationData::GetLockManager();
+	if (lm == nullptr)
+		ibBackendCoreException::Error(_("Lock manager not initialised"));
+	m_formLockHandle = lm->Acquire({
+		ibLockItem::ForNamespace(m_metaObject->GetDocPath(), mode)
+	});
+	return true;
+}
 
 bool ibValueRecordDataObjectConstant::SetConstValue(const ibValue& cValue)
 {
@@ -328,6 +342,25 @@ bool ibValueRecordDataObjectConstant::SetConstValue(const ibValue& cValue)
 
 	scope.SafeBeginTransaction();
 
+	// Layer-1 DB row-lock on this constant's singleton row. Concurrent
+	// writes to different constants don't conflict (each constant has
+	// its own table); concurrent writes to THIS constant serialize on
+	// the RECORD_KEY='6' row via the driver's FOR UPDATE / WITH LOCK.
+	// See docs/record-locks.md.
+	{
+		const wxString hint = scope->RowLockHint();
+		const wxString lockSql = wxT("SELECT 1 FROM ") + tableName
+		                       + wxT(" WHERE RECORD_KEY = '6'")
+		                       + (hint.IsEmpty() ? wxString() : wxT(" ") + hint)
+		                       + wxT(";");
+		ibDatabaseResultSet* lockRs = scope->RunQueryWithResults(lockSql);
+		if (lockRs != nullptr) {
+			// Drain — only the lock side effect matters.
+			while (lockRs->Next()) {}
+			scope->CloseResultSet(lockRs);
+		}
+	}
+
 	auto rollback = [&]() {
 		m_constValue = constValue;
 		scope.SafeRollBackTransaction();
@@ -338,7 +371,7 @@ bool ibValueRecordDataObjectConstant::SetConstValue(const ibValue& cValue)
 		ExecAsProc(wxT("BeforeWrite"), cancel);
 		if (cancel.GetBoolean()) {
 			rollback();
-			ibBackendCoreException::Error(_("failed to write object in db!"));
+			ibBackendCoreException::Error(_("Failed to write object in db!"));
 			return false;
 		}
 	}
@@ -353,33 +386,16 @@ bool ibValueRecordDataObjectConstant::SetConstValue(const ibValue& cValue)
 		return false;
 	}
 
-	wxString sqlText;
-	const bool isFB = (scope->GetDatabaseLayerType() == DATABASELAYER_FIREBIRD);
-	if (isFB) {
-		sqlText = "UPDATE OR INSERT INTO %s (%s, RECORD_KEY) VALUES(";
-		for (unsigned int i = 0; i < ibValueMetaObjectAttributeBase::GetSQLFieldCount(m_metaObject); ++i)
-			sqlText += "?,";
-		sqlText += "'6') MATCHING(RECORD_KEY);";
-	} else {
-		sqlText = "INSERT INTO %s (%s, RECORD_KEY) VALUES(";
-		for (unsigned int i = 0; i < ibValueMetaObjectAttributeBase::GetSQLFieldCount(m_metaObject); ++i)
-			sqlText += "?,";
-		sqlText += "'6') ON CONFLICT (RECORD_KEY) DO UPDATE SET "
-		         + ibValueMetaObjectAttributeBase::GetExcludeSQLFieldName(m_metaObject) + ";";
-	}
-
-	ibStatementGuard statement(scope.get(), scope->PrepareStatement(
-		sqlText, tableName, ibValueMetaObjectAttributeBase::GetSQLFieldName(m_metaObject)));
-	if (!statement) {
-		rollback();
-		return false;
-	}
-
-	int position = 1;
-	ibValueMetaObjectAttributeBase::SetValueAttribute(
-		m_metaObject, m_constValue, statement.get(), position);
-
-	if (statement->RunQuery() == DATABASE_LAYER_QUERY_RESULT_ERROR) {
+	// UPSERT the singleton row through the L3 write door. RECORD_KEY is the row-key — a RAW
+	// primary string column (constant value '6', matched on); the constant metaobject is
+	// itself the data attribute (a column). The FB MATCHING / PG ON CONFLICT fork and the
+	// manual '?,'-counting are gone — the dialect closes the UPSERT spelling. The door runs on
+	// the session holder, so it joins the TX that already holds this row's lock.
+	if (!ibDataQueryBuilder()
+		.From(m_metaObject->GetQueryable())
+		.SetValue(ibRawDBColumn::String(wxT("RECORD_KEY")), ibValue(wxT("6")))   // raw primary -> MATCHING
+		.SetValue(m_metaObject, m_constValue)                                          // data attribute
+		.Upsert()) {
 		rollback();
 		ibBackendCoreException::Error(_("Failed to write object in db!"));
 		return false;

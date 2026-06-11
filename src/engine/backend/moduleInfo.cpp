@@ -9,16 +9,8 @@
 #include "backend/compiler/cache/byteCodeCache.h"              // AOT cache Load / Save
 #include "backend/metaCollection/metaModuleObject.h"  // ibValueMetaObjectModuleBase full type for GetGuid/GetClassType
 
-ibRuntimeModuleDataObject::ibRuntimeModuleDataObject() :
-	m_compileModule(nullptr)
-{
-}
-
-ibRuntimeModuleDataObject::ibRuntimeModuleDataObject(ibCompileModule* compileCode) :
-	m_compileModule(compileCode)
-{
-}
-
+// The single ctor is inline in moduleInfo.h (it must reference ExportThunk +
+// BindTail). Only the dtor lives out-of-line.
 ibRuntimeModuleDataObject::~ibRuntimeModuleDataObject()
 {
 	// Drop this descriptor's bytecode from the process-wide registry
@@ -63,29 +55,100 @@ void ibRuntimeModuleDataObject::InitializeRuntime()
 	}
 }
 
-void ibRuntimeModuleDataObject::BindContextVariable(const wxString& name, ibValue* value)
+ibCompileModule* ibRuntimeModuleDataObject::EnsureCompileModule()
 {
-	// Lazy-create m_compileModule on first BindContextVariable —
-	// subclass provides its meta-object via GetMetaObject() override.
+	// Lazy-create m_compileModule on first Bind… — subclass provides its
+	// meta-object via GetMetaForCompile() override.
 	if (m_compileModule == nullptr) {
 		if (const ibValueMetaObjectModuleBase* meta = GetMetaForCompile()) {
 			m_compileModule = new ibCompileModule(meta);
-			// Propagate parent's compile scope chain — SetParent can
-			// be called before BindContextVariable; we pick up the
-			// parent compile on creation.
+			// Propagate parent's compile scope chain — SetParent can be
+			// called before the first Bind…; pick up parent compile here.
 			if (m_parent != nullptr) {
 				if (ibCompileModule* parentCompile = m_parent->GetCompileModule())
 					m_compileModule->SetParent(parentCompile);
 			}
 		}
 	}
-	if (m_compileModule != nullptr)
-		m_compileModule->AddContextVariable(name, value);
-	// If the runtime binder is already built (post-Compile), forward
-	// the value into its slot table too — keeps compile-time staging
-	// and runtime binder in sync without subclass plumbing.
+	return m_compileModule;
+}
+
+// See header. Append the EXPORT bindings as eProcUnit-aliased props so member
+// access (ThisForm.Controls / ThisObject.RegisterRecords) resolves them via the
+// descriptor's ProcUnit, exactly like ExportNamesToHelper does for module
+// exports. Context binds are the self-handles — skipped (no ThisForm.ThisForm).
+void ibRuntimeModuleDataObject::FillHelperFromBinds(ibValue::ibMemberTable* helper, long alias) const
+{
+	if (helper == nullptr) return;
+	const ibCompileModule* cm = GetCompileModule();
+	if (cm == nullptr) return;
+	for (const auto& kv : cm->m_listExternValue)
+		helper->AppendProp(kv.first, wxNOT_FOUND, alias);
+}
+
+ibValue* ibRuntimeModuleDataObject::GetBoundValue(const wxString& name) const
+{
+	const ibCompileModule* cm = GetCompileModule();
+	if (cm == nullptr) return nullptr;
+	auto it = cm->m_listExternValue.find(name);
+	return (it != cm->m_listExternValue.end()) ? it->second : nullptr;
+}
+
+// Named context variable — name VISIBLE in the editor (ThisObject / ThisForm).
+void ibRuntimeModuleDataObject::BindContextVariable(const wxString& name, ibValue* value)
+{
+	if (ibCompileModule* cm = EnsureCompileModule())
+		cm->AddContextVariable(name, value, /*scopeContext=*/false);
+	// If the runtime binder is already built (post-Compile), forward the
+	// value into its slot table too — keeps compile-time staging and runtime
+	// binder in sync without subclass plumbing.
 	if (m_binder != nullptr)
 		m_binder->SetVar(name, value);
+}
+
+// Transparent scope container — name NOT an identifier, members surface into
+// scope (Manager / EnumManager / SystemManager).
+void ibRuntimeModuleDataObject::BindScopeVariable(const wxString& name, ibValue* value)
+{
+	if (ibCompileModule* cm = EnsureCompileModule())
+		cm->AddContextVariable(name, value, /*scopeContext=*/true);
+	// Binder is name→value only; the scope flag is an editor-display concern
+	// with no runtime slot, so the runtime binding is identical to context.
+	if (m_binder != nullptr)
+		m_binder->SetVar(name, value);
+}
+
+// Export variable — name VISIBLE, stored in the extern map (global constants,
+// module-valued names).
+void ibRuntimeModuleDataObject::BindExportVariable(const wxString& name, ibValue* value)
+{
+	if (ibCompileModule* cm = EnsureCompileModule())
+		cm->AddVariable(name, value);
+	if (m_binder != nullptr)
+		m_binder->SetVar(name, value);
+}
+
+// Plain writable LOCAL — name resolves to an ordinary frame local (kind=Local),
+// but the binder seeds its slot with `value` at init. No required/type pre-flight,
+// no member access. E.g. a constant's Value backed by &m_constValue.
+void ibRuntimeModuleDataObject::BindLocalVariable(const wxString& name, ibValue* value)
+{
+	if (ibCompileModule* cm = EnsureCompileModule())
+		cm->AddLocalVariable(name, value);
+	if (m_binder != nullptr)
+		m_binder->SetVar(name, value);
+}
+
+// Undo any Bind… for `name`. Does NOT lazy-create the compile module — there's
+// nothing to remove from a module that was never wired.
+void ibRuntimeModuleDataObject::UnbindVariable(const wxString& name)
+{
+	if (m_compileModule != nullptr)
+		m_compileModule->RemoveVariable(name);
+	// Binder has no slot-erase; nulling the slot unbinds the live value while
+	// leaving the bytecode-declared slot in place (re-bind via SetVar later).
+	if (m_binder != nullptr)
+		m_binder->SetVar(name, nullptr);
 }
 
 void ibRuntimeModuleDataObject::Run(bool delta)
@@ -199,11 +262,18 @@ bool ibRuntimeModuleDataObject::Compile()
 	// and covers both arms cheaply.
 	m_binder = std::make_unique<ibByteBinder>(bc.m_listVar);
 	for (auto& kv : m_compileModule->m_listExternValue) {
-		if (kv.second) kv.second->PrepareNames();
+		if (kv.second) kv.second->InvalidateNames();
 		m_binder->SetVar(kv.first, kv.second);
 	}
 	for (auto& kv : m_compileModule->m_listContextValue) {
-		if (kv.second) kv.second->PrepareNames();
+		if (kv.second.m_value) kv.second.m_value->InvalidateNames();
+		m_binder->SetVar(kv.first, kv.second.m_value);
+	}
+	// Bound locals (e.g. a constant's Value backed by &m_constValue): plain
+	// writable frame slots — no PrepareNames (they're values, not surfaced
+	// objects). To the binder a local is indistinguishable from an external:
+	// both just seed a slot; IsBindable() unifies them in SetVar / pre-flight.
+	for (auto& kv : m_compileModule->m_listLocalValue) {
 		m_binder->SetVar(kv.first, kv.second);
 	}
 	return true;

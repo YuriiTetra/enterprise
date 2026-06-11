@@ -86,8 +86,10 @@ ibDataProcessorTree::ibDataProcessorTree(ibMetaDocument* docParent, wxWindow* pa
 
 	sbSizerTree->Add(m_metaTreeToolbar, 0, wxALL | wxEXPAND, 0);
 
+	// Card-style depth — panel powder-blue, tree cream (matches editor).
+	this->SetBackgroundColour(wxColour(184, 201, 212));   // #B8C9D4 powder-blue panel
 	m_metaTreeCtrl = new ibDataProcessorTreeCtrl(sbSizerTree->GetStaticBox(), this);
-	m_metaTreeCtrl->SetBackgroundColour(wxColour(250, 250, 250));
+	m_metaTreeCtrl->SetBackgroundColour(wxColour(250, 247, 240));  // #FAF7F0 cream tree
 
 	//set image list
 	m_metaTreeCtrl->AssignImageList(
@@ -106,7 +108,7 @@ ibDataProcessorTree::ibDataProcessorTree(ibMetaDocument* docParent, wxWindow* pa
 
 	bSizerMain->Add(sbSizerTree, 1, wxEXPAND, FromDIP(5));
 
-	ibMetaDataDataProcessor* metaData = ((ibDataProcessorFilibDocument*)docParent)->GetMetaData();
+	ibMetaDataDataProcessor* metaData = ((ibDataProcessorFileDocument*)docParent)->GetMetaData();
 	ibValueMetaObjectDataProcessor* commonMeta = metaData->GetDataProcessor();
 	const ibValueMetaObjectModule *moduleMeta = commonMeta->GetObjectModule();
 
@@ -277,7 +279,7 @@ ibDataProcessorTree::ibDataProcessorTreeCtrl::ibDataProcessorTreeCtrl(wxWindow* 
 	SetDoubleBuffered(true);
 }
 
-#include "frontend/docView/docManager.h"
+#include "frontend/docView/docView.h"
 
 ibDataProcessorTree::ibDataProcessorTreeCtrl::~ibDataProcessorTreeCtrl()
 {

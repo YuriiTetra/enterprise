@@ -9,6 +9,9 @@
 #include "backend/metaCollection/metaFormObject.h"
 
 #include <algorithm>
+#include <cwctype>
+#include <string>
+#include <unordered_set>
 
 //**************************************************************************************************
 //*                                       ibModuleStorage                                          *
@@ -47,6 +50,25 @@ bool ibModuleStorage::RemoveCommonModule(ibValueMetaObjectCommonModule* commonMo
 //*                                    ibCompileValueCache                                         *
 //**************************************************************************************************
 
+// Out-of-line — the complete ibValueModuleManagerDesigner type is available here
+// (moduleManager.h fully included), so the ibValuePtr<ibValueModuleManagerDesigner>
+// assign/convert (a ref-counting static_cast through ibValue*) compiles. In
+// metaData.h the type is only forward-visible under the moduleManager.h cycle.
+ibCompileValueCache::ibCompileValueCache(ibValueModuleManagerDesigner* moduleManager)
+	: m_moduleManager(moduleManager)
+{
+}
+
+ibValueModuleManagerDesigner* ibCompileValueCache::GetModuleManager() const
+{
+	return m_moduleManager;
+}
+
+void ibCompileValueCache::SetModuleManager(ibValueModuleManagerDesigner* moduleManager)
+{
+	m_moduleManager = moduleManager;
+}
+
 bool ibCompileValueCache::AddCompileModule(const ibValueMetaObject* moduleObject, ibValue* object)
 {
 	if (object == nullptr)
@@ -61,7 +83,7 @@ bool ibCompileValueCache::AddCompileModule(const ibValueMetaObject* moduleObject
 	return false;
 }
 
-bool ibCompileValueCache::AddCompileModule(const ibValueMetaObject* moduleObject, ibDeferredForm deferred)
+bool ibCompileValueCache::AddCompileModule(const ibValueMetaObject* moduleObject, std::function<ibValue*()> builder)
 {
 	if (moduleObject == nullptr)
 		return false;
@@ -69,7 +91,7 @@ bool ibCompileValueCache::AddCompileModule(const ibValueMetaObject* moduleObject
 	// after a designer rename + re-run) overrides the prior rebuilder
 	// and drops any built value so the next Find rebuilds from scratch.
 	ibCompileEntry entry;
-	entry.m_deferred = deferred;
+	entry.m_deferred = std::move(builder);
 	m_cache.insert_or_assign(moduleObject, std::move(entry));
 	return true;
 }
@@ -93,7 +115,7 @@ bool ibCompileValueCache::InvalidateCompileModule(const ibValueMetaObject* modul
 	// (e.g. catalog/document module). Nothing to invalidate; rebuild
 	// requires a fresh AddCompileModule(meta, value) by the registering
 	// side.
-	if (!it->second.m_deferred.has_value())
+	if (!it->second.m_deferred)
 		return false;
 
 	// Drop the cached built value; rebuilder stays so the next Find
@@ -115,7 +137,7 @@ ibValue* ibCompileValueCache::FindCompileModuleRef(const ibValueMetaObject* modu
 	// Pending or invalidated — try the rebuilder. mm should be ready by
 	// the time the first lookup arrives; on Construct failure the cache
 	// entry is dropped to avoid retrying on every subsequent lookup.
-	if (!it->second.m_deferred.has_value())
+	if (!it->second.m_deferred)
 		return nullptr;
 
 	// Re-entrancy guard: Construct internally calls
@@ -127,7 +149,7 @@ ibValue* ibCompileValueCache::FindCompileModuleRef(const ibValueMetaObject* modu
 		return nullptr;
 	it->second.m_constructing = true;
 
-	ibValue* value = it->second.m_deferred->Construct();
+	ibValue* value = it->second.m_deferred();
 
 	// Re-find: Construct may have called Invalidate / erase along the way.
 	it = m_cache.find(moduleObject);
@@ -156,14 +178,14 @@ ibValue* ibCompileValueCache::FindParentCompileModuleRef(const ibValueMetaObject
 //ID's 
 ibMetaID ibMetaData::GenerateNewID() const
 {
-	ibValueMetaObject* commonObject = GetCommonMetaObject();
+	const ibValueMetaObject* commonObject = GetCommonMetaObject();
 	wxASSERT(commonObject);
 	ibMetaID id = commonObject->GetMetaID() + 1;
 	DoGenerateNewID(id, commonObject);
 	return id;
 }
 
-void ibMetaData::DoGenerateNewID(ibMetaID& id, ibValueMetaObject* top) const
+void ibMetaData::DoGenerateNewID(ibMetaID& id, const ibValueMetaObject* top) const
 {
 	for (unsigned int idx = 0; idx < top->GetChildCount(); idx++) {
 		ibValueMetaObject* child = top->GetChild(idx);
@@ -184,8 +206,8 @@ ibValueMetaObject* ibMetaData::CreateMetaObject(const ibClassID& clsid, ibValueM
 	ibValueMetaObject* newMetaObject = nullptr;
 
 	try {
+		// AddChild (inside Init via ppParams[0]=parent) takes the owning reference.
 		newMetaObject = ibValue::CreateAndConvertObjectRef<ibValueMetaObject>(clsid, ppParams, 1);
-		newMetaObject->IncrRef();
 	}
 	catch (...) {
 		return nullptr;
@@ -202,29 +224,29 @@ ibValueMetaObject* ibMetaData::CreateMetaObject(const ibClassID& clsid, ibValueM
 
 		//first initialization
 		if (!success || !newMetaObject->OnLoadMetaObject(this)) {
-			if (parent != nullptr) {
-				parent->RemoveChild(newMetaObject);
-			}
-			wxDELETE(newMetaObject);
+			if (parent != nullptr)
+				parent->RemoveChild(newMetaObject); // owning vector releases → destroys
+			else
+				wxDELETE(newMetaObject); // never attached (no parent) — destroy directly
 			return nullptr;
 		}
 
 		//and running initialization
 		if (runObject && (!success || !newMetaObject->OnBeforeRunMetaObject(newObjectFlag))) {
-			if (parent != nullptr) {
-				parent->RemoveChild(newMetaObject);
-			}
-			wxDELETE(newMetaObject);
+			if (parent != nullptr)
+				parent->RemoveChild(newMetaObject); // owning vector releases → destroys
+			else
+				wxDELETE(newMetaObject); // never attached (no parent) — destroy directly
 			return nullptr;
 		}
 
 		Modify(true);
 
 		if (runObject && (!success || !newMetaObject->OnAfterRunMetaObject(newObjectFlag))) {
-			if (parent != nullptr) {
-				parent->RemoveChild(newMetaObject);
-			}
-			wxDELETE(newMetaObject);
+			if (parent != nullptr)
+				parent->RemoveChild(newMetaObject); // owning vector releases → destroys
+			else
+				wxDELETE(newMetaObject); // never attached (no parent) — destroy directly
 			return nullptr;
 		}
 	}
@@ -234,47 +256,45 @@ ibValueMetaObject* ibMetaData::CreateMetaObject(const ibClassID& clsid, ibValueM
 
 wxString ibMetaData::GetNewName(const ibClassID& clsid, ibValueMetaObject* parent, const wxString& strPrefix, bool forConstructor)
 {
-	unsigned int countRec = forConstructor ?
-		0 : 1;
-
-	wxString currPrefix = strPrefix.Length() > 0 ?
+	const wxString currPrefix = strPrefix.Length() > 0 ?
 		strPrefix : wxT("newItem");
 
-	wxString newName = forConstructor ?
-		wxString::Format(wxT("%s"), currPrefix) :
-		wxString::Format(wxT("%s%d"), currPrefix, countRec);
+	// Normalise to upper case, matching stringUtils::CompareString's
+	// case-insensitive semantics, so set lookups are exact comparisons.
+	const auto toKey = [](const wxString& name) {
+		std::wstring key = name.ToStdWstring();
+		std::transform(key.begin(), key.end(), key.begin(), ::towupper);
+		return key;
+	};
 
-	while (forConstructor ||
-		countRec > 0) {
+	// Collect the sibling names already taken by objects of this class
+	// once, so each candidate is probed in O(1). The old loop rescanned
+	// every child for each candidate suffix — O(children * candidates)
+	// per call. FilterChild(clsid) is invariant here (every surviving
+	// child has class == clsid), so it is hoisted out of the scan.
+	std::unordered_set<std::wstring> takenNames;
+	if (parent != nullptr && parent->FilterChild(clsid)) {
 
-		bool foundedName = false;
+		for (unsigned int idx = 0; idx < parent->GetChildCount(); idx++) {
 
-		if (parent != nullptr) {
+			auto child = parent->GetChild(idx);
+			if (clsid != child->GetClassType())
+				continue;
+			if (child->IsDeleted())
+				continue;
 
-			for (unsigned int idx = 0; idx < parent->GetChildCount(); idx++) {
-
-				auto child = parent->GetChild(idx);
-				if (clsid != child->GetClassType())
-					continue;
-
-				if (!parent->FilterChild(child->GetClassType()))
-					continue;
-
-				if (child->IsDeleted())
-					continue;
-
-				if (stringUtils::CompareString(newName, child->GetName())) {
-					foundedName = true;
-					break;
-				}
-			}
+			takenNames.insert(toKey(child->GetName()));
 		}
-
-		if (!foundedName)
-			break;
-
-		newName = wxString::Format(wxT("%s%d"), currPrefix, ++countRec);
 	}
+
+	// forConstructor allows the bare prefix as the first candidate;
+	// otherwise numbering starts at 1.
+	unsigned int countRec = forConstructor ? 0 : 1;
+	wxString newName = forConstructor ?
+		currPrefix : wxString::Format(wxT("%s%d"), currPrefix, countRec);
+
+	while (takenNames.count(toKey(newName)) > 0)
+		newName = wxString::Format(wxT("%s%d"), currPrefix, ++countRec);
 
 	return newName;
 }
@@ -303,6 +323,12 @@ bool ibMetaData::RenameMetaObject(ibValueMetaObject* metaObject, const wxString&
 
 void ibMetaData::RemoveMetaObject(ibValueMetaObject* object, ibValueMetaObject* parent)
 {
+	// Both close phases — symmetric with CreateMetaObject's Before+After run phases.
+	// The before-hook carries the real teardown (RemoveCompileModule /
+	// RemoveCommonModule from the compile cache + module storage); skipping it left
+	// stale module registrations that later asserted on an "empty registry".
+	if (!object->OnBeforeCloseMetaObject())
+		return;
 	if (object->OnAfterCloseMetaObject()) {
 		if (object->OnDeleteMetaObject()) {
 			object->MarkAsDeleted();

@@ -4,14 +4,15 @@
 
 1. [System Overview](#system-overview)
 2. [Layer Descriptions](#layer-descriptions)
-3. [Module Descriptions](#module-descriptions)
-4. [Bytecode Engine](#bytecode-engine)
-5. [Metadata System](#metadata-system)
-6. [Sessions and Runtime Ownership](#sessions-and-runtime-ownership)
-7. [Database Abstraction](#database-abstraction)
-8. [Form System](#form-system)
-9. [Debugger Architecture](#debugger-architecture)
-10. [Key Data Flows](#key-data-flows)
+3. [Application Bootstrap and Ownership](#application-bootstrap-and-ownership)
+4. [Module Descriptions](#module-descriptions)
+5. [Bytecode Engine](#bytecode-engine)
+6. [Metadata System](#metadata-system)
+7. [Sessions and Runtime Ownership](#sessions-and-runtime-ownership)
+8. [Database Abstraction](#database-abstraction)
+9. [Form System](#form-system)
+10. [Debugger Architecture](#debugger-architecture)
+11. [Key Data Flows](#key-data-flows)
 
 ---
 
@@ -21,7 +22,7 @@
 ┌──────────────────────────────────────────────────────────────┐
 │                      Executables                             │
 │  designer.exe   enterprise.exe   launcher.exe   daemon.exe   │
-│  codeRunner.exe   classChecker.exe                           │
+│  codeRunner.exe                                              │
 └────────────┬─────────────────┬────────────────┬─────────────┘
              │                 │                │
              ▼                 ▼                ▼
@@ -60,7 +61,6 @@ Each executable links against both DLLs and provides a `wxApp` subclass that sel
 | `wenterprise-server.exe` | `eWEB_ENTERPRISE_MODE` | Web runtime host — HTTP server, N per-cookie user sessions, browser client |
 | `daemon.exe` | `eSERVICE_MODE` | Headless background service |
 | `codeRunner.exe` | `eSERVICE_MODE` | Executes a single script module |
-| `classChecker.exe` | — | Validates metadata consistency |
 
 > A rename `eENTERPRISE_MODE → eRUNTIME_MODE` is planned — the current name misleads, both thick-client and web hosts are "runtime", just with different UI transports. The constants stay as-is until the rename lands.
 
@@ -85,6 +85,149 @@ Shared frontend objects:
 - **`ibVisualHost` / `ibVisualHostClient`** — render and input routing surface. Desktop = wxWindow; web = `ibWebWindow` tree serialised to JSON.
 - **Doc-view frames** — backend-facing interface `ibBackendDocFrame` (renamed from the historical `ibBackendDocMDIFrame`); concrete implementations are `ibFrontendDocMDIFrame` (desktop, wraps `wxAuiMDIParentFrame` + `wxDocParentFrameAnyBase`) and `ibWebFrame` (web). Children are `CAuiDocChildFrame` / `ibDialogDocChildFrame` on desktop and `ibWebDocChildFrame` on web. The frame is owned by the `ibSession` that created it (no process-level singleton on the backend side); legacy `mainFrame` macro still exists in `frontend/mainFrame/mainFrame.h` as a frontend-local accessor for the GUI singleton, but new backend code reaches the frame through `ibSession::Current()->GetFrame()` or `ibSession::CurrentFrame()`. Template-mixin rewrite to follow `wxDocParentFrameAny` is partial — `ibFrontendDocMDIFrame` keeps the "MDI" suffix until the frontend-side rename lands.
 - **`ibCodeEditor`** (`frontend/win/editor/codeEditor/`) — the Scintilla-based script editor. Lives in `frontend.dll` so any GUI host can use it: `designer.exe` (its module/form editors), `codeRunner.exe` (sessionless scratch runner). Highlighter, fold parser, auto-indent on Enter, format / increase / decrease indent, comment add/remove, Ctrl-Space autocomplete, GotoLine + ProceduresAndFunctions dialogs all live here. Debugger integration is a designer-only concern, kept out of the base via six virtual hooks (`IsDebuggerEnterLoop`, `OnEditDebugPoint`, `OnPatchModule`, `OnEvaluateAutocomplete`, `OnEvaluateToolTip`, `RefreshBreakpointMarkers`); designer's `ibCodeEditorDesigner` (`designer/win/editor/codeEditor/codeEditorDesigner.{h,cpp}`) overrides them with `debugClient->…` calls. Document-less / sessionless mode: passing `nullptr` for the `ibMetaDocument*` skips metadata-driven autocomplete and breakpoint markers but keeps everything else functional — codeRunner uses this to embed the same editor without any DB / metadata / debug infrastructure.
+
+---
+
+## Application Bootstrap and Ownership
+
+OES runs on a single coordinator — `ibApplicationData` (`backend/appData.h`) — that owns every process-wide subsystem. No subsystem has a static `Instance()` of its own; every `Get*()` returns `nullptr` before bring-up and after teardown, callers null-check. The pattern is the same for every entry-point binary (enterprise / designer / launcher / codeRunner / daemon / wes); only the run-mode flag and the wxApp class change.
+
+### The sandwich
+
+```
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ exe-specific main()                                             │
+  │   • argv parsing, runMode pick                                  │
+  │   • ibCrashGuard::Install (headless) OR ibWxApp::OnInit (GUI)   │
+  │   • appDataCreateFile / appDataCreateServer                     │
+  └────────────────────────────┬────────────────────────────────────┘
+                               │
+                               ▼
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ ibApplicationData ctor — wires every subsystem in init order    │
+  │                                                                 │
+  │   m_connectionPool   ◄── primary DB layer, lazy clones          │
+  │   m_pluginManager    ◄── scans plugins/ and loads .dll          │
+  │   m_lockManager      ◄── sys_lock coordinator                   │
+  │   m_logger           ◄── audit + trace sink (.olg)              │
+  │   m_sessionRegistry  ◄── ibSession registry + worker pool       │
+  │   m_helpService      ◄── syntax-helper corpus (.hlk per locale) │
+  │   m_activeMetaData   ◄── per-runMode fabric, populated later    │
+  │                                                                 │
+  │   (each ctor takes ib::AppDataCtorToken — see below)            │
+  └────────────────────────────┬────────────────────────────────────┘
+                               │
+                               ▼
+  ┌─────────────────────────────────────────────────────────────────┐
+  │ ibSession (per-cookie on web, single on desktop)                │
+  │   • holds a connection holder out of the pool                   │
+  │   • owns a per-session ibProcUnit (runtime)                     │
+  │   • frame/document graph on GUI; visual host on web             │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+### Construction order (`ibApplicationData::ibApplicationData`)
+
+The init list is **the** ordering contract. Listed in the order they're constructed:
+
+| # | Field | What it does | Why this slot |
+|---|---|---|---|
+| 1 | `m_connectionPool` | Pool of `ibDatabaseLayer` — master + lazy clones | Everything else needs DB access; this must exist first. |
+| 2 | `m_pluginManager` | Loads `plugins/*.dll` | Plugins may need `db_query` (=pool). |
+| 3 | `m_lockManager` | `sys_lock` table coordinator | Independent — could move; ordered for readability. |
+| 4 | `m_sessionRegistry` | Session registry + worker pool | After pool so first session can already check connections out. `m_logger` is created lazily in `CreateLogger()` after the DB opens; not in init list. |
+
+`m_helpService` (syntax-helper corpus) is constructed lazily in `InitLocale()` once the platform locale is settled — corpus directory naming depends on the canonicalised locale code, so the service can't come up before locale resolution finishes. See `docs/syntax-helper-design.md` for the loader / `ZipSource` / pack-on-build pipeline.
+
+`m_activeMetaData` is populated later by `CreateActiveMetaData(mode, flags)` — the fabric picks a concrete subclass (`ibMetaDataConfiguration` for runtime, `ibMetaDataConfigurationStorage` for designer) by `runMode`. Launcher/codeRunner have no metadata at all.
+
+### Destruction order (`~ibApplicationData`)
+
+The destructor does **business actions only** (the explicit hooks each subsystem needs before its dtor fires). It does NOT call `reset()` on any `unique_ptr` field — destruction is left to the compiler-generated sweep in **reverse declaration order**. Declaration order in `appData.h` is chosen so reverse sweep gives the safe sequence:
+
+```
+~ibApplicationData() {
+    m_activeMetaData->OnDestroy();      // business hook
+    m_sessionRegistry->Stop();          // drain workers, DELETE sys_session
+    m_pluginManager->UnloadAll();       // each plugin sees Destroy()
+    m_connectionPool->Shutdown();       // invalidate handouts
+    // dtor sweep follows:
+    //   m_activeMetaData    (last declared → destroyed first)
+    //   m_sessionRegistry
+    //   m_logger            (own SQLite, no external deps)
+    //   m_lockManager
+    //   m_pluginManager
+    //   m_connectionPool    (first declared → destroyed last)
+}
+```
+
+If a new subsystem joins, **add the business hook to the dtor body** and **append the field in declaration order so it dies before its dependencies**.
+
+### Token pattern for subsystem construction
+
+Every owned subsystem's ctor takes `ib::AppDataCtorToken` (`backend/appDataCtorToken.h`) as its first argument. The token's default ctor is private; only `ibApplicationData` is a friend, so only it can mint a token. External code that tries `new ibSessionRegistry(…)` gets a compile error — token is unreachable.
+
+Why a token instead of `friend class ibApplicationData` on each subsystem header? Friend scattered across 7 headers means refactoring appData ripples into every owned class. A single token type centralises the "who can build subsystems" decision; subsystem headers stay clean and declare ctors public.
+
+Unit tests build subsystems directly (no full appData) — the test CMake target defines `OES_TESTING`, which opens the token's default ctor inside test TUs only. Production builds (sln / CMake non-test) leave it undefined and the gate stays closed.
+
+### Entry-point helpers
+
+Two header-only helpers in `frontend/diagnostics/` cover the boilerplate every binary needs at startup. Header-only = no link-time `frontend.dll` dependency; both helpers only call `BACKEND_API ibCrashGuard::*` plus wx primitives the binary already links.
+
+| Binary type | Helper | What it wires |
+|---|---|---|
+| GUI (`enterprise` / `designer` / `codeRunner` / `launcher`) | `ibWxApp` base class (`oesApp.h`) | `wxApp::OnInit` → `ibCrashGuard::Install` + `DoOnInit()`; `OnRun` → try/catch around `DoOnRun()`; 3 exception overrides (main-loop / unhandled / fatal). Subclass overrides only `GetExeName()` + optional `DoOnRun()`. |
+| Console (`wenterprise-server` / `daemon`) | `ibOesConsoleBoot` RAII (`oesConsole.h`) | Single object that holds a `wxInitializer`, runs `wxSocketBase::Initialize`, calls `ibCrashGuard::Install`. `IsOk()` checks the wx init result. |
+
+### Crash plumbing layers
+
+```
+  backend/diagnostics/crashGuard.{h,cpp}  ─── BACKEND_API. Headless:
+                                              SEH filter / signal handlers /
+                                              minidump writer / std::set_terminate /
+                                              <exe>_terminate.log + <exe>_startup.log /
+                                              MessageBoxW (Win) | fprintf+stderr (POSIX)
+                                              No wx UI, no main loop required.
+
+  frontend/diagnostics/oesApp.h           ─── Header-only. wxApp pipeline:
+                                              wxDebugReportPreviewStd, wxMessageBox,
+                                              wxLogError, wxTheApp->CallAfter. Delegates
+                                              logging to crashGuard.
+
+  frontend/diagnostics/oesConsole.h       ─── Header-only. RAII boot helper for
+                                              console binaries. Wraps wxInitializer +
+                                              wxSocket init + crashGuard::Install.
+
+  wfrontend layer (web)                   ─── cpp-httplib set_exception_handler in
+                                              wes' main.cpp emits JSON 500 with
+                                              Kind / native_code / sqlstate. crashGuard
+                                              handles process-level faults underneath.
+```
+
+### Exception taxonomy
+
+```
+  ibBackendException                      ─── base; per-thread error chain
+    │                                          (PushLastError / DrainLastErrors).
+    │
+    ├── ibBackendDatabaseException        ─── DB-tier failure. Enum Kind:
+    │     │                                    ConnectionLost / Syntax / Constraint /
+    │     │                                    Deadlock / Timeout / Unknown.
+    │     │                                    IsRetryable() derived from Kind.
+    │     │
+    │     └── ibDatabaseLayerException    ─── Concrete driver throw. Adds
+    │                                          GetDriverErrorCode() + GetSqlState().
+    │                                          Created via static Throw(...).
+    │
+    └── (other backend categories)
+```
+
+Per-driver `ClassifyDatabaseError(int nativeCode)` on each `ibDatabaseErrorReporter` subclass maps the driver's native code (Firebird `isc_*` gds, PG SQLSTATE int, MySQL errno, ODBC SQLSTATE, SQLite result code) to a Kind. The mapping is regression-tested in `tests/test_dbTaxonomy.cpp` — if a future driver bump flips `SQLITE_CONSTRAINT (19)` away from `Kind::Constraint`, the test fails before code that branches on `IsRetryable()` silently misroutes.
+
+`catch` discipline:
+- **Inside RAII destructors and rollback / cleanup paths**: `catch (...) {}` is intentional (a destructor that throws is worse than a swallowed error during cleanup).
+- **Inside business logic**: never swallow — log via the per-thread chain, rethrow, or surface via `ibCrashReporter::ReportStartupError` / `ibWxApp::OnExceptionInMainLoop`.
 
 ---
 
@@ -133,7 +276,7 @@ Metadata object hierarchy. Every business object type extends `ibValueMetaObject
 
 | File | Class | Role |
 |---|---|---|
-| `systemManager.h/cpp` | `ibSystemManager` | Built-in function dispatcher; registers 88 built-in functions |
+| `systemManager.h/cpp` | `ibSystemManager` | Built-in function dispatcher; registers ~93 built-in functions (count drifts as features land; grep `AppendFunc\|AppendProc` for the live total) |
 | `systemEnum.h` | enums | System-level enumeration constants |
 
 ### `src/engine/frontend/visualView/`
@@ -192,7 +335,7 @@ Opcodes are defined as plain integer constants in `src/engine/backend/compiler/c
 | Control flow | `OPER_GOTO`, `OPER_IF`, `OPER_FOR`, `OPER_FOREACH`, `OPER_IN`, `OPER_NEXT`, `OPER_NEXT_ITER` |
 | Variables | `OPER_LET`, `OPER_CONST`, `OPER_CONSTN`, `OPER_SET`, `OPER_SETREF`, `OPER_SETCONST` |
 | Functions | `OPER_FUNC`, `OPER_ENDFUNC`, `OPER_CALL`, `OPER_CALL_CLOSURE` (heap-frame variant when the callee has an inner lambda capturing locals), `OPER_CALL_METHOD`, `OPER_RET` |
-| Lambdas | `OPER_LFUNC`, `OPER_ENDLFUNC` (anonymous body fences — distinct from `OPER_FUNC`/`OPER_ENDFUNC` so a containing named-function's module-init skip doesn't terminate on a nested lambda's terminator), `OPER_FUNC_PTR` (materialises an `ibValueFunction` wrapper into a slot), `OPER_CALL_LAMBDA` (dynamic call — target read from a slot at runtime, must wrap an `ibValueFunction`). See `docs/lambda.md`. |
+| Lambdas | `OPER_LFUNC` (anonymous body entry — materialises an `ibValueFunction` value at its dest slot in one step), `OPER_ENDLFUNC` (body close — distinct from `OPER_FUNC`/`OPER_ENDFUNC` so a containing named-function's module-init skip doesn't terminate on a nested lambda's terminator), `OPER_CALL_LAMBDA` (dynamic call — target read from a slot at runtime, must wrap an `ibValueFunction`). See `docs/lambda.md`. `OPER_FUNC_PTR` was an earlier separate materialise opcode — retired; doc references kept for git-blame readability only. |
 | LINQ | `OPER_CALL_LINQ` — universal pipeline method on an iterable receiver (Where / Select / OrderBy / GroupBy / Join / Skip / Take / Aggregate / ...). Compile-side detects LINQ method names at chain-method emit time and chooses this opcode over `OPER_CALL_METHOD`; runtime reads the `ibValue::ibLinqMethod` enum id directly from `m_param3.m_numIndex` (no const-string lookup, no `FindMethod` walk) and dispatches through the virtual `ibValue::DispatchLinqMethod`. See `docs/linq.md`. |
 | Arrays | `OPER_GET_ARRAY`, `OPER_SET_ARRAY`, `OPER_CHECK_ARRAY`, `OPER_SET_ARRAY_SIZE`, `OPER_ENTER_A`, `OPER_GET_A`, `OPER_SET_A` |
 | Objects | `OPER_NEW`, `OPER_SET_TYPE` |
@@ -207,9 +350,9 @@ Each opcode has type-specialised variants selected by adding `TYPE_DELTA1` (numb
 
 ### Keyword Inventory
 
-44 keywords defined in `KEY_*` enumerators (e.g., `KEY_IF`, `KEY_FOR`, `KEY_FOREACH`, `KEY_PROCEDURE`, `KEY_FUNCTION`, `KEY_TRY`, `KEY_EXCEPT`, `KEY_ENDTRY`, `KEY_RAISE`, `KEY_NEW`, etc.) plus preprocessor keywords (`KEY_DEFINE`, `KEY_UNDEF`, `KEY_IFDEF`, `KEY_IFNDEF`, `KEY_REGION`, `KEY_ENDREGION`). Keywords are English-only — there are no Cyrillic / Russian-language synonyms (unlike 1C:Enterprise). Two parallel syntax modes share these keywords and compile to the same bytecode:
-- **VES** — Visual-Basic-style: `If c Then … EndIf`, `For Each x In coll … EndDo`, `Procedure F() … EndProcedure`. Keyword-fenced blocks.
-- **CES** — C-style: `if (c) { … }`, `for each (x in coll) { … }`, `Procedure F() { … }`. Brace-delimited. Default for new configurations since 2026-05-10.
+44 keywords defined in `KEY_*` enumerators (e.g., `KEY_IF`, `KEY_FOR`, `KEY_FOREACH`, `KEY_PROCEDURE`, `KEY_FUNCTION`, `KEY_TRY`, `KEY_EXCEPT`, `KEY_ENDTRY`, `KEY_RAISE`, `KEY_NEW`, etc.) plus preprocessor keywords (`KEY_DEFINE`, `KEY_UNDEF`, `KEY_IFDEF`, `KEY_IFNDEF`, `KEY_REGION`, `KEY_ENDREGION`). Keywords are English-only — there are no Cyrillic / Russian-language synonyms. Two parallel syntax modes share these keywords and compile to the same bytecode:
+- **VES** — Visual-Basic-style: `If c Then … EndIf`, `Foreach x In coll Do … EndDo`, `Procedure F() … EndProcedure`. Keyword-fenced blocks.
+- **CES** — C-style: `if (c) { … }`, `Foreach (x In coll) { … }`, `Procedure F() { … }`. Brace-delimited. Default for new configurations since 2026-05-10.
 
 Mode is process-global on `ibCompileCode::SetCodeStyle()`; serialised configurations preserve their stored Syntax flag (wire token still reads `vbs` for back-compat).
 
@@ -309,20 +452,20 @@ OES distinguishes between **metadata** (compile-time, process-wide, shared) and 
 - **User info** — `ibUserInfo` (formerly `ibApplicationDataUserInfo`) — OES-user (from `sys_user` table), distinct from the DB-level admin user used to open the database connection. Plus `m_sessionRawPassword` — plain-text cached only for Designer "Start debugging" so spawned children can re-authenticate without prompting. `ibUserInfo` itself owns sys_user CRUD as static factories — `appData` no longer mediates.
 - **Working date** — `m_workDate` per-session (replaces the legacy static `ibValueSystemFunction::ms_workDate` so two web sessions don't step on each other).
 - **Configuration language** — `m_languageCode` (explicit override) plus `m_resolvedLanguageCode` (cached `override || user-default`). Selects which metadata synonym / form-label translation is shown. Per-session so concurrent web tabs each render their own user's language. Distinct from the platform's wxLocale (UI gettext, process-wide). Routed through `ibBackendLocalization::GetActiveLanguage()` / `SetActiveLanguage()`.
-- **Root module manager** — `m_root : ibValuePtr<ibValueModuleManagerConfiguration>`. Created via `EnsureRoot()` in `ibSessionRegistry::NotifyAuthenticated`'s middle phase (between `OnFirstConnect` and `OnAuthenticated` listener phases). Stays nullptr for sessions that never run scripts (Designer, WebServer technical, Launcher).
-- **Frame** — `m_frame : ibBackendDocFrame*` (non-owning) for plain `ibSession`, or overridden virtual `GetFrame()` on `ibGUISession`. The frame belongs to the session, not to a process-wide singleton.
+- **Root module manager** — `m_root : ibValuePtr<ibValueModuleManagerRuntimeConfiguration>`. Created via `EnsureRoot()` in `ibSessionRegistry::NotifyAuthenticated`'s middle phase (between `OnFirstConnect` and `OnAuthenticated` listener phases). Stays nullptr for sessions that never run scripts — **the Designer never creates a root** (`EnsureRoot` is gated on `DesignerMode()`; it uses the lightweight `ibValueModuleManagerDesigner` in the compile cache instead), and likewise WebServer technical / Launcher. Objects/records/modules reach the right manager through the `ibSession::GetEditModuleManager(metaData)` seam (Designer → compile-cache designer manager; runtime → `m_root`). See `module-manager-split.md`.
+- **Frame** — `virtual ibBackendDocFrame* GetFrame() const { return nullptr; }` on base `ibSession`. Frame storage lives on derived sessions that have a GUI surface (e.g. `ibWebClientSession::SetFrame(ibWebFrame*)`; `ibGUISession` desktop variants). Base has no `m_frame` field — null means "no frame on this session" (codeRunner / wenterprise-server technical session). The frame belongs to the session that created it, not to a process-wide singleton.
 - **Per-session debug** — optional `ibDebugSession` (CV/mutex + per-session watch expressions + run context) so concurrent web sessions can each enter their own debug loop without blocking.
 - **Exclusive (monopoly) mode** — `m_exclusive`. At most one session in the registry holds it; while held, every other Connect parks until release.
 - **Server back-link** — `m_server : weak_ptr<ibSession>` from a server-spawned client to the session that hosts it (e.g., wes's WebClient → wes's WebServer). Used by shutdown logic, cluster topology, and admin UI.
 
 `ibSession::Current()` is the canonical "session this code is currently working on". Dispatch depends on `AccessMode` (a process-wide setting fixed at startup before any session is created):
 
-- **Single** (desktop, daemon, codeRunner, classChecker) — one session per process for its lifetime. `Current()` returns the lone session regardless of thread.
+- **Single** (desktop, daemon, codeRunner) — one session per process for its lifetime. `Current()` returns the lone session regardless of thread.
 - **Shared** (wenterprise-server) — per-thread lookup of bound sessions, with a process-wide fallback for threads that aren't bound (registry consumer, signal handlers).
 
 `ibSessionScope` (legacy) and `ibSessionThreadBinding` (preferred for app entry points) are the RAII helpers that bind a session to the calling thread. The interpreter no longer reads global `thread_local` state directly: `ibProcUnitState` lives under `ibSession` (`session.h`), and the only `thread_local` slot in `session.cpp` is a fallback for sessionless callers (codeRunner sandbox / system bootstrap). The worker pool (`workerPool.h` + `workerPoolHeadless.cpp`) leases a session into a thread via `tl_currentLease` and runs the request on it.
 
-Runtime ProcUnits are not held in a per-session map on `ibSession` itself. Each module descriptor (`ibModuleDataObject`) keeps its own `m_procUnit`. Per-session ProcUnit ownership through a descriptor map is the target end-state of the runtime-facade plan (see [`runtime-facade.md`](runtime-facade.md), step 1) — not yet landed.
+Runtime ProcUnits live on per-session descriptors. The session's root `ibValueModuleManagerRuntimeConfiguration` (`ibSession::m_root`) owns common modules, forms, and per-instance object runtimes; each child is its own descriptor (`ibRuntimeModuleDataObject`) carrying its own `shared_ptr<ibProcUnit>`. Concurrent web sessions therefore each work on their own descriptor instances — no shared ProcUnit, no cross-session execution mutex. See `runtime-facade.md` for the descriptor composition / parent chain details.
 
 ### ibSessionRegistry
 
@@ -336,41 +479,38 @@ Runtime ProcUnits are not held in a per-session map on `ibSession` itself. Each 
 
 The registry supports multiple concurrent sessions (N on web, 1 on desktop) through the same mechanism. See `project_session_registry_refactor` memory entry for the current implementation status.
 
-### Runtime ownership — current state and direction
+### Runtime ownership
 
-**Current:**
-- Compile state (`ibCompileCode` with immutable `ibByteCode`) lives on the descriptor (`ibModuleDataObject`) and is shared across sessions.
-- ProcUnits are kept on the descriptor itself (`ibModuleDataObject::m_procUnit`). The descriptor's runtime is rebuilt for each session by `ibValueModuleManager::AttachRuntime(session)` and torn down by `DetachRuntime(session)` — both serialised by `m_runtimeMutex`. There is no per-session ProcUnit map yet; the descriptor's ProcUnit is single-occupancy at any given moment, so concurrent web sessions on the same descriptor must coordinate through the runtime mutex (current scaling ceiling).
-- The session's root `ibValueModuleManagerConfiguration` is owned by `ibSession::m_root` (intrusive-refcounted via `ibValuePtr`). `ibSession::CreateRoot(metaData)` allocates it; `ibSession::CompileRoot()` runs `CreateMainModule`; `appData`'s `OnAuthenticated` listener then drives `RunDatabase` (one-shot per process) + `CompileRoot` + `mm->AttachRuntime(session)`.
-- `BeforeStart / OnStart / BeforeExit / OnExit` events dispatch through the session's root module manager.
+**Compile state — shared, immutable.** `ibCompileCode` produces an `ibByteCode` that lives on the configuration's compile descriptor (`ibCompileModule` on `ibValueMetaObjectModuleBase`). One bytecode per module is shared across all sessions; rebuilt only on Designer edit or metadata reload. AOT cache (`sys_bytecode_cache` via `ibByteCodeCache`) lets `Compile()` skip the parse+emit on cache hits — see [AOT cache](#ast-cache) below.
 
-**Direction (in progress, see [`runtime-facade.md`](runtime-facade.md)):**
-
-`ibValueModuleManager` becomes the per-session runtime root. The descriptor's `m_procUnit` field disappears in favour of a per-descriptor `m_runtimes : map<ibSession*, shared_ptr<ibModuleDataObject>>`. Nested nodes (common module, catalog/document instance, form, external DP) inherit from `ibModuleDataObject + ibValue` and parent up via `weak_ptr<ibModuleDataObject> m_parent`. Eval is the only exception — outside the descriptor map, parent set from `ibValueModuleManager::Current()` at compile time.
-
-Target structure for a runtime node:
+**Runtime state — per-session, owned via descriptors.** Each session owns its own runtime tree:
 
 ```
-ibModuleDataObject (per-session)
-  ├── compileModule  — back-ref to compile state (descriptor-shared)
-  ├── procUnit       — shared_ptr<ibProcUnit> (mutable runtime state)
-  └── parent         — weak_ptr<ibModuleDataObject> (common→root, form→object|root, eval→Current())
-
-ibValueModuleManager : ibModuleDataObject (root only — per-session singleton)
-  ├── m_session     — which session owns it
-  └── m_context     — runtime context (locals frame chain)
+ibSession::m_root  →  ibValueModuleManagerRuntimeConfiguration  (per-session root)
+                       │
+                       ├── ibValueModuleUnit             (per common module)
+                       │     └── m_procUnit : shared_ptr<ibProcUnit>
+                       ├── ibValueModuleUnit             (per common module)
+                       │     └── m_procUnit : shared_ptr<ibProcUnit>
+                       └── ...
 ```
 
-- Main module = session's runtime root; common modules, forms, per-instance catalog/document runtimes hang off as children via `parent` weak chain.
-- Script dispatch walks the parent chain — each runtime reaches enclosing globals through parent's procUnit.
-- Teardown cascade: session.Stop() iterates `m_touchedDescriptors` and calls `_DropRuntime(this)` on each; the descriptor drops its `shared_ptr<runtime>` for that session, the runtime dtor releases its procUnit, parent weak refs expire bottom-up.
-- `ibByteCode` becomes self-contained (holds its own moduleName, rootContext, parent-bytecode ref); the `byteCode->m_compileModule` back-pointer is removed. This decouples runtime lifetime from `ibCompileCode` lifetime — metadata reload can drop compile state while running sessions hold their bytecode through their shared_ptr.
+- The root manager `m_compileModule` references the shared compile state; its `m_procUnit` is the session's main module ProcUnit.
+- Each common module wraps a child `ibRuntimeModuleDataObject` (`backend/moduleInfo.h`) carrying its own `shared_ptr<ibProcUnit>` and `m_binder` (per-execute context-var binder produced by `bc.CreateBinder()`). Context handles (`ThisObject`/`ThisForm`), scope containers, export handles (`Controls`/`DataSource`/…) and a module's own injected locals (a constant's `Value`) are registered once via `Bind{Context,Scope,Export,Local}Variable` and seed the binder — they replaced the hand-rolled `PrepareNames`/`AppendProp` name surface. See [Name binding](name-binding.md).
+- Forms, per-instance catalog/document runtimes, external data processors / reports hang off as children of the root via the same descriptor mixin (`m_parent` raw-pointer chain; container enforces parent-outlives-child).
+- Concurrent sessions therefore run on **physically separate** ProcUnit instances. The shared resource is the immutable `ibByteCode` (read-only); per-session frame stacks, locals, and binders are isolated.
 
-**Same model for desktop and web** — desktop has N=1 session (process-wide, `AccessMode::Single`), web has N per-cookie (`AccessMode::Shared`). The `ibSessionRegistry + ibSession + ibSessionScope + runtime tree` stack is identical; differences are only in session count and threading (desktop = wx main thread dispatches scripts; web = per-session worker thread via `RunOnWorker`).
+**`m_runtimeMutex` guards bring-up vs teardown, not execution.** `ibValueModuleManager::AttachRuntime(session)` (called from `ibApplicationData::Connect` for desktop / `ibWebSession::Login` for web) builds the runtime tree under the lock. `DetachRuntime(session)` drops it under the same lock. Per-session script execution does NOT take this lock — different sessions execute in parallel on their own descriptors.
+
+**Worker pool dispatch.** Script execution runs on a worker thread leased via `ibWorkerPool` (`backend/session/workerPool.h` + headless impl). Each request leases a session into `tl_currentLease` for the call's duration; `ibSession::Current()` resolves through this slot. Desktop has N=1 session on the wx main thread; web has N per-cookie sessions, each pinned to its own worker. The script interpreter never touches global `thread_local` state directly — `ibProcUnitState` lives under `ibSession`, the one `thread_local` fallback in `session.cpp` exists only for sessionless callers (codeRunner sandbox / system bootstrap).
+
+**Same model for desktop and web** — the only difference is session count and entry threading. The `ibSessionRegistry + ibSession + ibSessionScope + per-session runtime tree + worker pool` stack is identical across all run modes.
+
+**Bytecode self-contained.** `ibByteCode` holds its own moduleName, rootContext, parent-bytecode ref, and dependency manifest. There is no `byteCode->m_compileModule` back-pointer; runtime lifetime is decoupled from `ibCompileCode` lifetime, so metadata reload can drop compile state while running sessions hold their bytecode through their shared_ptr.
 
 ### Designer — compile only
 
-Designer (`eDESIGNER_MODE`) creates sessions without runtime — `AttachRuntime` returns early for Designer role. Designer reads `ibCompileCode` for autocomplete, function search, jump-to-definition, and cascading recompile. Scripts are not executed. Debug sessions attach to a separate runtime process (enterprise.exe / wenterprise-server.exe) via the TCP debug protocol.
+Designer (`eDESIGNER_MODE`) creates sessions without runtime — `AttachRuntime` returns early for Designer role. Designer reads `ibCompileCode` for autocomplete, function search, jump-to-definition, and cascading recompile. Scripts are not executed. Autocomplete surfaces bound names by reading the compile module's bind tables along the **descriptor** parent chain (the compile-module parent link is dead in the designer) — see [Name binding § Designer](name-binding.md#designer--surfacing-the-same-binds). Debug sessions attach to a separate runtime process (enterprise.exe / wenterprise-server.exe) via the TCP debug protocol.
 
 ---
 
