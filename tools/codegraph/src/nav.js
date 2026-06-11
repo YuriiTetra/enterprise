@@ -30,6 +30,25 @@ async function ensureFresh(clangd, fresh) {
   if (fresh) await clangd.awaitIndexed();
 }
 
+/**
+ * Actively warm clangd's in-memory index for a symbol's neighbourhood. The
+ * background index settling on disk is NOT enough — clangd loads cross-file
+ * data lazily on query, so call hierarchy comes back empty until the symbol's
+ * references have been pulled. We poll references() until the count stabilizes
+ * (the empirically-reliable "this symbol is fully resolved" signal), then the
+ * subsequent call-hierarchy query returns the complete set.
+ */
+async function warmSymbol(clangd, loc, { rounds = 12, gapMs = 4000 } = {}) {
+  let prev = -1, stable = 0;
+  for (let i = 0; i < rounds; i++) {
+    let n = 0;
+    try { n = (await clangd.references(loc.file, loc.line, loc.character, false)).length; } catch { /* */ }
+    if (n === prev) { if (++stable >= 2) return n; } else { stable = 0; prev = n; }
+    await new Promise((r) => setTimeout(r, gapMs));
+  }
+  return prev;
+}
+
 export async function definition(db, clangd, target, { fresh = true } = {}) {
   await ensureFresh(clangd, fresh);
   const loc = locate(db, target);
@@ -50,6 +69,7 @@ export async function callers(db, clangd, target, { fresh = true } = {}) {
   await ensureFresh(clangd, fresh);
   const loc = locate(db, target);
   if (!loc || loc._needName) return { error: 'symbol not located', target };
+  if (fresh) await warmSymbol(clangd, loc);
   const inc = await clangd.incomingCalls(loc.file, loc.line, loc.character);
   return { target, name: loc.name, count: inc.length, callers: inc };
 }
@@ -61,6 +81,7 @@ export async function blastRadius(db, clangd, target, { depth = 2, fresh = true,
   await ensureFresh(clangd, fresh);
   const root = locate(db, target);
   if (!root || root._needName) return { error: 'symbol not located', target };
+  if (fresh) await warmSymbol(clangd, root);
 
   const seen = new Set();
   const levels = [];

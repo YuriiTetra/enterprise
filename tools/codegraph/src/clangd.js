@@ -11,8 +11,11 @@
 
 import { spawn } from 'node:child_process';
 import { pathToFileURL, fileURLToPath } from 'node:url';
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+
+function readdirSyncSafe(d) { try { return readdirSync(d); } catch { return []; } }
+function statSyncSafe(p) { try { return statSync(p); } catch { return null; } }
 
 export class Clangd {
   /**
@@ -139,15 +142,38 @@ export class Clangd {
   }
 
   /**
-   * Resolve once background indexing is idle. This is the freshness guard.
-   * @param {number} timeoutMs
+   * Resolve once background indexing is idle — the freshness guard. clangd's
+   * LSP work-done progress is unreliable across versions, so the ground-truth
+   * signal is filesystem quiescence of the index shard dir: clangd streams
+   * `.idx` shards as it indexes, so "no shard written for `quietMs`" means the
+   * background index has settled. Falls back to the LSP idle latch if present.
+   * @param {number} timeoutMs   hard ceiling
+   * @param {number} quietMs     shard-write silence that counts as idle
    */
-  awaitIndexed(timeoutMs = 60000) {
-    if (this._everIdle && this._activeProgress.size === 0) return Promise.resolve(true);
-    return new Promise((resolve) => {
-      const t = setTimeout(() => resolve(false), timeoutMs);
-      this._idleWaiters.push(() => { clearTimeout(t); resolve(true); });
-    });
+  async awaitIndexed(timeoutMs = 300000, quietMs = 10000) {
+    const deadline = Date.now() + timeoutMs;
+    const idxDir = path.join(this.root, '.cache', 'clangd', 'index');
+    // Signature = (shard count, newest mtime). The index has settled when BOTH
+    // stop changing for quietMs — count stable rules out "still adding shards",
+    // mtime stable rules out "still rewriting". A 6s lull mid-index does not
+    // count; we need a sustained 10s plateau.
+    const sig = () => {
+      let count = 0, mx = 0;
+      for (const f of readdirSyncSafe(idxDir)) {
+        const st = statSyncSafe(path.join(idxDir, f));
+        if (st) { count++; if (st.mtimeMs > mx) mx = st.mtimeMs; }
+      }
+      return `${count}:${mx}`;
+    };
+    let lastSig = null, stableSince = Date.now();
+    for (;;) {
+      const now = Date.now();
+      const s = sig();
+      if (s === lastSig) { if (now - stableSince >= quietMs && s !== '0:0') return true; }
+      else { lastSig = s; stableSince = now; }
+      if (now >= deadline) return false;
+      await new Promise((r) => setTimeout(r, 2000));
+    }
   }
 
   // ---- documents ----------------------------------------------------------
