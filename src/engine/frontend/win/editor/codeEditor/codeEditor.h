@@ -513,7 +513,6 @@ protected:
 	void OnKeyDown(wxKeyEvent& event);
 	void OnCharAdded(wxStyledTextEvent& event);
 	void OnUpdateUI(wxStyledTextEvent& event);
-	void OnContextMenu(wxContextMenuEvent& event);
 	void OnMouseMove(wxMouseEvent& event) {
 		LoadToolTip(event.GetPosition());
 		event.Skip();
@@ -526,7 +525,6 @@ public:
 	// definition" (Phase 4), and "Find usages" (Phase 4) — all want the
 	// same semantics: explicit selection wins, otherwise the word the
 	// caret is inside.
-	wxString GetIdentifierUnderCursor();
 
 	// ---- Sigma AI inline completion (Phase 6.2) ----
 	// Manual-trigger ghost-text suggestion below the current line via
