@@ -135,3 +135,35 @@ If upstream's syntax-helper has anything worth keeping, port it into `help/` fir
 - backend/compiler/procUnit.cpp (3 hunks) — core hand-merge (develop VM specializations + theirs additions)
 - designer/mainFrame/* (6) + frontend/{docView/docView, mainFrame/mainFrame.h, visualView/ctrl/formObject, win/editor/codeEditor/codeEditor} (4) — keep theirs' AI-assistant/help features BUT apply develop's doc/view-fork type renames (wxView→ibView, CAuiDocChildFrame→ibAuiDocChildFrame) which pervade the merged frontend; theirs predates the fork, so any old-type usage in a kept hunk must be renamed or it won't compile.
 - Then: rm the losing help dir, full build -j2 (PCH on; expect macOS/Clang portability fixes — the syntax-helper track was MSVC-developed), oes_tests, land.
+
+---
+# DECISION MADE 2026-06-12 — keep UPSTREAM syntax-helper, drop Yurii's
+
+Owner chose: keep `backend/syntaxHelper/` + `frontend/syntaxHelper/` (the upstream
+port, with `ibHelpService`); DROP Yurii's `backend/help/` + `frontend/help/`. The
+syntax-helper is therefore ALREADY in develop — the merge brings in Yurii's
+plugin / AI-assistant / metaBridge / template track, NOT his help subsystem.
+
+## This FLIPS the help-related resolutions (decision log above is corrected here)
+
+- backend/CMakeLists.txt help-staging hunk → **OURS** (develop's `.hlk` packing), NOT theirs.
+- backend/system/systemManager.cpp → **OURS** (develop's helper population), NOT theirs.
+- backend/appData.{cpp,h} → **OURS** for the help member/init (`m_helpService` / `ibHelpService`), keep develop's includes. Do NOT bring `helpCorpus`/`RebuildHelpCorpus`.
+- After the merge applies, **`git rm -r src/engine/backend/help src/engine/frontend/help`** (Yurii's discarded help dirs that the merge would add as new files).
+- Any feature/syntax-helper code that referenced `backend/help/` (designer help-panel wiring in mainFrameDesignerParts.cpp, the `frontend/help/*` views) must be repointed to upstream's `syntaxHelper/` API, or those specific help-integration bits dropped. The AI-assistant / plugin / template features that do NOT touch help carry over unchanged.
+
+## Unchanged from the decision log (non-help)
+
+- tests/test_compiler.cpp → ours (+wx/debug.h); test_number.cpp → theirs; tests/CMakeLists.txt → union
+- record-object refactor family (catalog/document/register Object + catalogManager_impl) → ours
+- session.cpp → ours; byteCodeCache.cpp → ours; backend_exception.{cpp,h} → ours
+- simplePlugin → theirs; designer reorg deletes accepted; root CMakeLists → dumpHelp only; vcxproj → theirs
+- procUnit.cpp + designer/frontend UI conflicts → hand-merge keeping theirs' plugin/AI features WITH develop's doc/view-fork type renames (ibView etc.)
+
+## Net effect
+
+Simpler than first feared: develop's help wins wholesale, so the help collision
+disappears (drop Yurii's help dirs). The merge's real payload is the plugin
+system, AI-assistant pane, metaBridge, template wizard, oes-rag-local. Execute in
+a fresh session: apply the corrected log, drop help/ dirs, hand-merge the ~10 UI/
+core files, full build -j2 (PCH on), oes_tests, land.
