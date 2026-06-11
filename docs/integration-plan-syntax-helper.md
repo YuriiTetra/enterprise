@@ -167,3 +167,52 @@ disappears (drop Yurii's help dirs). The merge's real payload is the plugin
 system, AI-assistant pane, metaBridge, template wizard, oes-rag-local. Execute in
 a fresh session: apply the corrected log, drop help/ dirs, hand-merge the ~10 UI/
 core files, full build -j2 (PCH on), oes_tests, land.
+
+---
+# EXECUTION RESULT 2026-06-12 — backend GREEN, frontend hit the doc/view-fork wall
+
+Executed the merge on `feature/integrate-syntax-helper` (commit 20737489 — WIP,
+NOT on develop; develop reset clean to origin). All 35 conflicts resolved.
+
+## Backend — DONE, builds clean (0 errors) on macOS Clang
+
+Fixes beyond the conflict log:
+- value.h: removed the dead GetMethodList/PropList/CtorList getters (they
+  referenced Yurii's helper struct from the dropped help/ subsystem) + removed
+  dumpHelp (their only caller). This was the root of a 2329-error cascade —
+  dumpHelp instantiated the getters, forcing the undefined types to resolve.
+- byteCodeCache.cpp: Load() gained the expectedVersion param to match the header.
+- backend_exception: ported ibBackendTestAssertException + FormatAssertionFailure
+  from the syntax-helper track (test-runner needs them; we kept develop's lock
+  exception, so both coexist now).
+Result: backend 2329 -> 0. The plugin / metaBridge / template / AI-backend code
+integrates cleanly.
+
+## Frontend — BLOCKED on the doc/view fork (the real cost of the divergence)
+
+develop refactored wx doc/view into ib (ibDocument / ibView / ibAuiDocChildFrame /
+ibFrontendMainFrame) AFTER feature/syntax-helper branched. So theirs' entire
+frontend (docView, formObject, the AI-assistant designer panels, pluginWebPane)
+is built on the PRE-fork wx hierarchy. The two are mutually incompatible in one
+frontend.dll:
+- Taking theirs' docView/formObject → references wxDocument/wxView (undefined; merged is ibDocument/ibView).
+- Taking develop's docView/formObject → references ibFrontendDocMDIFrame and other develop-fork frame names that theirs' merged designer headers (ibFrontendMainFrame) don't provide.
+- ~41 residual frontend errors, concentrated in docView.cpp (19) + formObject.cpp (18) + chatContext/chatHistory (3) + mcp-server (API drift: GetFileDirectory, SetValueAttribute, ibMetaDataConfigurationBase::Get renamed on develop).
+
+NOTE: develop's OWN frontend was never build-verified this session (only the
+backend de-risk built). develop's docView.cpp shows a latent `ibValueModulibDocument`
+typo + wx-base references — develop's frontend may itself need a fix.
+
+## What the frontend port actually requires (dedicated follow-up)
+
+Port theirs' AI-assistant frontend (designer panels, pluginWebPane, the editor
+integrations) onto develop's forked doc/view hierarchy — file by file, not
+whole-file ours/theirs. Plus fix the mcp-server/chat API drift (rename the calls
+to develop's current method names). This is real engineering, scoped but not
+trivial; it is the genuine cost of the two tracks diverging across the fork.
+
+## Recommendation
+
+Land the backend integration separately (it's green) if a backend-only cut is
+useful, OR keep the whole thing on the branch until the frontend port lands.
+The WIP is on feature/integrate-syntax-helper (20737489). develop stays clean.
