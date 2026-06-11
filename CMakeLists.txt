@@ -34,6 +34,29 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)
 
 # ---------------------------------------------------------------------------
+# Build acceleration (opt-in, zero-config — used only when present)
+#   - ccache: caches object files, near-instant rebuilds after a branch switch
+#             or a touched header. Biggest single win for iterative dev.
+#   - lld:    much faster linking of the big backend/frontend .dylib/.so than
+#             the default linker. Detected, never required.
+# Ninja is recommended on top of these (`cmake -G Ninja`): its no-op and
+# incremental dependency checks are seconds, versus the Make generator walking
+# every target. PCH (see each lib's CMakeLists) cuts the dominant cost on a
+# clean build — the heavy wxWidgets headers parsed once per target, not per TU.
+# ---------------------------------------------------------------------------
+find_program(OES_CCACHE ccache)
+if(OES_CCACHE)
+    set(CMAKE_CXX_COMPILER_LAUNCHER "${OES_CCACHE}")
+    set(CMAKE_C_COMPILER_LAUNCHER   "${OES_CCACHE}")
+    message(STATUS "  ccache ............ ${OES_CCACHE}")
+endif()
+find_program(OES_LLD ld.lld)
+if(OES_LLD)
+    add_link_options(-fuse-ld=lld)
+    message(STATUS "  linker ............ lld (${OES_LLD})")
+endif()
+
+# ---------------------------------------------------------------------------
 # Export compile_commands.json for IDE / clangd support
 # ---------------------------------------------------------------------------
 
