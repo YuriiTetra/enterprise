@@ -320,4 +320,33 @@ private:
 
 #pragma endregion
 
+
+class BACKEND_API ibBackendTestAssertException : public ibBackendException {
+public:
+	// Build a fully-formed test-assert exception and throw it. Stored fields
+	// power GetErrorDescription() + the structured failure block in the
+	// run_tests envelope.
+	static void Error(const wxString& assertion,
+	                  const wxString& actualText,
+	                  const wxString& expectedText,
+	                  const wxString& message);
+
+	const wxString& GetAssertion()    const { return m_assertion; }
+	const wxString& GetActualText()   const { return m_actualText; }
+	const wxString& GetExpectedText() const { return m_expectedText; }
+	const wxString& GetMessage()      const { return m_message; }
+
+private:
+	ibBackendTestAssertException(const wxString& assertion,
+	                             const wxString& actualText,
+	                             const wxString& expectedText,
+	                             const wxString& message,
+	                             const wxString& formatted);
+
+	wxString m_assertion;
+	wxString m_actualText;
+	wxString m_expectedText;
+	wxString m_message;
+};
+
 #endif

@@ -56,8 +56,9 @@ bool ibByteCodeCache::Save(const ibByteCode& bc)
 	return true;
 }
 
-bool ibByteCodeCache::Load(ibByteCode& outBc, const ibGuid& descId)
+bool ibByteCodeCache::Load(ibByteCode& outBc, const ibGuid& descId, const ibGuid* expectedVersion)
 {
+	(void)expectedVersion;   // version-gate not yet wired in this body; signature matches the header
 	if (db_query == nullptr) return false;
 	if (!db_query->TableExists(bytecode_cache_table)) return false;
 

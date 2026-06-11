@@ -469,3 +469,44 @@ void ibBackendLockException::LockConflictThrow(const wxString& objectName,
 // rest of the database layer.
 
 #pragma endregion
+
+static wxString FormatAssertionFailure(const wxString& assertion,
+                                       const wxString& actualText,
+                                       const wxString& expectedText,
+                                       const wxString& message)
+{
+	wxString out;
+	out << wxT("Assertion failed: ") << assertion;
+	if (!message.IsEmpty())
+		out << wxT(" — ") << message;
+	if (!expectedText.IsEmpty() || !actualText.IsEmpty()) {
+		out << wxT("\n  expected: ") << expectedText;
+		out << wxT("\n  actual:   ") << actualText;
+	}
+	return out;
+}
+
+
+ibBackendTestAssertException::ibBackendTestAssertException(
+	const wxString& assertion,
+	const wxString& actualText,
+	const wxString& expectedText,
+	const wxString& message,
+	const wxString& formatted)
+	: ibBackendException(formatted),
+	  m_assertion(assertion),
+	  m_actualText(actualText),
+	  m_expectedText(expectedText),
+	  m_message(message)
+{
+}
+
+void ibBackendTestAssertException::Error(const wxString& assertion,
+                                          const wxString& actualText,
+                                          const wxString& expectedText,
+                                          const wxString& message)
+{
+	throw ibBackendTestAssertException(
+		assertion, actualText, expectedText, message,
+		FormatAssertionFailure(assertion, actualText, expectedText, message));
+}
