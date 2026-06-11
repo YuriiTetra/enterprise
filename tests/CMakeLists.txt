@@ -44,8 +44,11 @@ add_executable(oes_tests
     test_logger.cpp
     test_dbTaxonomy.cpp
     test_metadataSerialize.cpp
+    test_queryRenderer.cpp
     test_queryLifecycle.cpp
+    test_queryBuilderShowcase.cpp
     test_queryTotals.cpp
+    test_queryL2.cpp
     test_queryComposer.cpp
     test_queryL3Vocab.cpp
     test_queryL4Lexer.cpp
@@ -54,31 +57,6 @@ add_executable(oes_tests
     test_lambdaRecorder.cpp
     test_queryValueMembers.cpp
 )
-
-# These three suites reference ibDatabaseLayerPostgres::Dialect() (a static
-# dialect dictionary used as a representative dialect throughout their
-# multi-dialect rendering tests). The postgres driver — and therefore that
-# symbol — is only compiled into the backend when OES_USE_POSTGRESQL is ON
-# (it loads libpq dynamically at runtime, so it builds without system libpq,
-# but the driver TUs are still excluded when the option is off). Compile
-# these suites only when the postgres dialect is available, otherwise the
-# whole oes_tests binary fails to link on Firebird/SQLite-only builds (e.g.
-# the default macOS configuration).
-#
-# Follow-up: extract the libpq-free Dialect()/TempDialect() statics into an
-# always-compiled TU so these suites (which also cover Firebird/SQLite
-# rendering) run on every platform regardless of the postgres option.
-if(OES_USE_POSTGRESQL)
-    target_sources(oes_tests PRIVATE
-        test_queryRenderer.cpp
-        test_queryBuilderShowcase.cpp
-        test_queryL2.cpp
-    )
-else()
-    message(STATUS "  Tests ............. skipping query-renderer suites "
-                   "(test_queryRenderer/BuilderShowcase/L2) — need OES_USE_POSTGRESQL "
-                   "for the postgres dialect symbol")
-endif()
 
 target_link_libraries(oes_tests
     PRIVATE

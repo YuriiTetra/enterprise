@@ -1006,6 +1006,9 @@
     <ClCompile Include="databaseLayer\odbc\odbcResultSetMetaData.cpp">
       <Filter>databaseLayer\odbc</Filter>
     </ClCompile>
+    <ClCompile Include="databaseLayer\postgresDialect.cpp">
+      <Filter>databaseLayer</Filter>
+    </ClCompile>
     <ClCompile Include="databaseLayer\postgres\postgresDatabaseLayer.cpp">
       <Filter>databaseLayer\postgres</Filter>
     </ClCompile>

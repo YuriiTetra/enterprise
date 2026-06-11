@@ -425,6 +425,7 @@
     <ClCompile Include="databaseLayer\odbc\odbcPreparedStatement.cpp" />
     <ClCompile Include="databaseLayer\odbc\odbcResultSet.cpp" />
     <ClCompile Include="databaseLayer\odbc\odbcResultSetMetaData.cpp" />
+    <ClCompile Include="databaseLayer\postgresDialect.cpp" />
     <ClCompile Include="databaseLayer\postgres\postgresDatabaseLayer.cpp" />
     <ClCompile Include="databaseLayer\postgres\postgresInterface.cpp" />
     <ClCompile Include="databaseLayer\postgres\postgresParameter.cpp" />
