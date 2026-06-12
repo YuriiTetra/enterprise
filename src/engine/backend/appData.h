@@ -334,6 +334,10 @@ public:
 	public:
 		ScopedDesignerDataWrite();
 		~ScopedDesignerDataWrite();
+		ScopedDesignerDataWrite(const ScopedDesignerDataWrite&) = delete;
+		ScopedDesignerDataWrite& operator=(const ScopedDesignerDataWrite&) = delete;
+		ScopedDesignerDataWrite(ScopedDesignerDataWrite&&) = delete;
+		ScopedDesignerDataWrite& operator=(ScopedDesignerDataWrite&&) = delete;
 	private:
 		bool m_previous = false;
 	};
