@@ -5238,11 +5238,164 @@ msgstr "Запуск OES"
 #~ msgid "Open enterprise solutions, build %i"
 #~ msgstr "Открытые корпоративные решения, создайте %i"
 
-#~ msgid "a RAD tool powered by wxWidgets framework"
-#~ msgstr "инструмент быстрой разработки приложений (RAD), работающий на основе фреймворка wxWidgets"
-
 #~ msgid "(C) 2026 Maxim 'nouverbe' Kornienko"
 #~ msgstr "(C) 2026 Максим 'nouverbe' Корниенко"
 
 #~ msgid "wetyu"
 #~ msgstr "ветю"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Parameters"
+msgstr "Параметры"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Returns"
+msgstr "Возвращает"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Example"
+msgstr "Пример"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Availability"
+msgstr "Доступность"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "See also"
+msgstr "См. также"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Syntax Helper"
+msgstr "Синтакс-помощник"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Show Syntax Helper"
+msgstr "Показать Синтакс-помощник"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Look up in Syntax Helper"
+msgstr "Искать в Синтакс-помощнике"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Contents"
+msgstr "Содержание"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Index"
+msgstr "Указатель"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Search"
+msgstr "Поиск"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Select topic"
+msgstr "Выбор темы"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Select a topic from the list:"
+msgstr "Выберите тему из списка:"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Found: %zu"
+msgstr "Найдено: %zu"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Found: 0 (enter a query)"
+msgstr "Найдено: 0 (введите запрос)"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Select an entry in the tree on the left, or press Ctrl+F1 on an identifier in the editor."
+msgstr "Выберите статью в дереве слева или нажмите Ctrl+F1 на идентификаторе в редакторе."
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Draft — this entry awaits editorial review."
+msgstr "Черновик — статья ожидает редакторской проверки."
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Open Enterprise Solutions, build %i"
+msgstr "Open Enterprise Solutions, сборка %i"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "a RAD tool powered by wxWidgets framework"
+msgstr "RAD-инструмент на базе фреймворка wxWidgets"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "(c) 2026 OES community"
+msgstr "(c) 2026 сообщество OES"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "wxWidgets and wxFormBuilder, Unknown Worlds Entertainment team"
+msgstr "wxWidgets и wxFormBuilder, команда Unknown Worlds Entertainment"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "2C team, whose ideas were taken as the basis for building the interpreter"
+msgstr "Команда 2C — идеи легли в основу интерпретатора"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "Tomasz Sowa who developed ttmath"
+msgstr "Tomasz Sowa, разработчик ttmath"
+
+#: src/engine/frontend/help/ (syntax helper UI)
+msgid "And also everyone who was not mentioned here"
+msgstr "И всем, кто не был здесь упомянут"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Add context"
+msgstr "Добавить контекст"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Adds selected @objects from the input field to the persistent chat context"
+msgstr "Добавляет выбранные @объекты из поля ввода в постоянный контекст чата"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Reset"
+msgstr "Сбросить"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Removes all pinned objects from the current chat context"
+msgstr "Убирает все закреплённые объекты из контекста текущего чата"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Objects that are automatically sent to the assistant with each question"
+msgstr "Объекты, которые будут автоматически передаваться ассистенту вместе с вопросом"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Context: "
+msgstr "Контекст: "
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "none"
+msgstr "нет"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Context added"
+msgstr "Контекст добавлен"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Type @ in the input field, choose an object, then click Add context."
+msgstr "Наберите @ в поле ввода, выберите объект и нажмите «Добавить контекст»."
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Context reset"
+msgstr "Контекст сброшен"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Syntax: "
+msgstr "Синтаксис: "
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Current configuration script syntax. The assistant uses it silently."
+msgstr "Текущий синтаксис скриптов конфигурации. Ассистент использует его без отдельного сообщения."
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "request a change plan"
+msgstr "запросить план изменений"
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Agent provider is not connected."
+msgstr "Провайдер агента не подключён."
+
+#: src/engine/frontend/pluginWebPane/pluginWebPane.cpp
+msgid "Failed to send the request to the agent provider."
+msgstr "Не удалось отправить запрос провайдеру агента."

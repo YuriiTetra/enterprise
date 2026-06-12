@@ -4,6 +4,8 @@
 #include "procContext.h"
 #include "compileCode.h"  // ibProcUnitEvaluate owns std::unique_ptr<ibCompileCode>
 
+#include <type_traits>
+
 struct ibProcUnitState;   // procUnitState.h — forward decl; full type via ibSession::GetPUState()
 
 // Forward decl — ibValueFunction lives inline in procUnit.cpp; needs
@@ -104,13 +106,33 @@ public:
 	long FindFunction(const wxString& strMethodName, bool bError = false, int bExportOnly = 0) const;
 	long FindProcedure(const wxString& strMethodName, bool bError = false, int bExportOnly = 0) const;
 
-	template <typename ...Types>
+	// Variadic helpers for the "pass live ibValue references" call style:
+	//   pu.CallAsProc("Foo", ibValue(7), ibValue(8));
+	// Constrained to ibValue-typed parameters so they don't shadow the
+	// (funcName, params**, size) overload — a forwarding ref accepts
+	// anything otherwise, and `&args...` on a non-ibValue arg yields
+	// pointer-to-array / int* which the array init in the body rejects.
+	//
+	// std::decay_t strips refs + cv-quals so a `const ibValue&` arg
+	// also satisfies the constraint (binds to const ibValue*; the
+	// non-const ibValue** target intentionally rejects const at the
+	// body level — same behaviour as a direct CallAsProc on a const
+	// lvalue, but with a clearer SFINAE-rejection if needed later).
+	//
+	// Temporaries (ibValue(7)) are safe: the implicit `ibValue* ppParams[]`
+	// array lives for the full expression of the inner CallAsProc call,
+	// which consumes ppParams before returning.
+	template <typename ...Types,
+	          typename = std::enable_if_t<
+	              (std::is_same_v<std::decay_t<Types>, ibValue> && ...)>>
 	inline void CallAsProc(const wxString& funcName, Types&&... args) {
 		ibValue* ppParams[] = { &args..., nullptr };
 		CallAsProc(funcName, ppParams, (const long)sizeof ...(args));
 	}
 
-	template <typename ...Types>
+	template <typename ...Types,
+	          typename = std::enable_if_t<
+	              (std::is_same_v<std::decay_t<Types>, ibValue> && ...)>>
 	inline void CallAsFunc(const wxString& funcName, ibValue& pvarRetValue, Types&&... args) {
 		ibValue* ppParams[] = { &args..., nullptr };
 		CallAsFunc(funcName, pvarRetValue, ppParams, (const long)sizeof ...(args));

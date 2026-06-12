@@ -100,6 +100,8 @@ option(OES_USE_ODBC        "Enable ODBC database driver"        OFF)
 # only single-user. Turn OFF to exclude the spawn code entirely (saves
 # ~20 KB, drops winsock dependency in the TU).
 option(OES_FB_LOCALSERVER  "Enable Firebird out-of-process local server (Phase 6)" ON)
+option(OES_BUILD_WFRONTEND  "Build the web frontend variant + wenterprise-server (deferred: doc/view-web stubs)" OFF)
+option(OES_BUILD_MCP_SERVER "Build the oes-mcp server (deferred: API-drift port)" OFF)
 
 # SQLite is always available (embedded sources in the project).
 
@@ -205,6 +207,15 @@ add_subdirectory("${OES_3RDPARTY_DIR}/wxWidgets" "${CMAKE_BINARY_DIR}/wxWidgets"
 
 # After add_subdirectory, wxWidgets targets (wx::core, wx::base, wx::aui, etc.)
 # are available as imported targets.
+
+# ---------------------------------------------------------------------------
+# md4c — vendored CommonMark markdown→HTML parser. Used by frontend's
+# native AI Assistant pane to render assistant replies inside a
+# wxHtmlWindow (no WebView dependency).
+# ---------------------------------------------------------------------------
+if(EXISTS "${OES_3RDPARTY_DIR}/md4c/CMakeLists.txt")
+    add_subdirectory("${OES_3RDPARTY_DIR}/md4c" "${CMAKE_BINARY_DIR}/md4c")
+endif()
 
 # ---------------------------------------------------------------------------
 # Optional database drivers — find system libraries
@@ -330,13 +341,20 @@ endif()
 
 add_subdirectory("${OES_ENGINE_DIR}/backend")
 add_subdirectory("${OES_ENGINE_DIR}/frontend")
-add_subdirectory("${OES_ENGINE_DIR}/wenterprise-server")
+if(OES_BUILD_WFRONTEND)  # web server links wfrontend; off by default (pre-existing doc/view-web stub issue)
+    add_subdirectory("${OES_ENGINE_DIR}/wenterprise-server")
+endif()
 add_subdirectory("${OES_ENGINE_DIR}/daemon")
 add_subdirectory("${OES_ENGINE_DIR}/enterprise")
 add_subdirectory("${OES_ENGINE_DIR}/designer")
 add_subdirectory("${OES_ENGINE_DIR}/launcher")
 add_subdirectory("${OES_ENGINE_DIR}/codeRunner")
 add_subdirectory("${OES_ENGINE_DIR}/simplePlugin")
+add_subdirectory("${OES_ENGINE_DIR}/aiBridge")
+if(OES_BUILD_MCP_SERVER)  # oes-mcp; off by default pending API-drift port
+    add_subdirectory("${OES_ENGINE_DIR}/mcp-server")
+endif()
+add_subdirectory("${OES_ENGINE_DIR}/oes-rag-local")
 
 # ---------------------------------------------------------------------------
 # Unit tests (Google Test)
