@@ -347,7 +347,7 @@ add_subdirectory("${OES_ENGINE_DIR}/launcher")
 add_subdirectory("${OES_ENGINE_DIR}/codeRunner")
 add_subdirectory("${OES_ENGINE_DIR}/simplePlugin")
 add_subdirectory("${OES_ENGINE_DIR}/aiBridge")
-add_subdirectory("${OES_ENGINE_DIR}/mcp-server")
+# DEFERRED (API drift port): add_subdirectory("${OES_ENGINE_DIR}/mcp-server")
 add_subdirectory("${OES_ENGINE_DIR}/oes-rag-local")
 
 # ---------------------------------------------------------------------------

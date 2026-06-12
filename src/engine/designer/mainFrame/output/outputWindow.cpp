@@ -32,7 +32,7 @@ wxEND_EVENT_TABLE()
 
 #include "mainFrame/mainFrameDesigner.h"
 
-ibOutputWindow::ibOutputWindow(ibFrontendDocMDIFrame* parent, wxWindowID winid)
+ibOutputWindow::ibOutputWindow(ibFrontendMainFrame* parent, wxWindowID winid)
 	: wxStyledTextCtrl(parent, winid, wxDefaultPosition, wxDefaultSize)
 {
 	// initialize styles
@@ -64,7 +64,7 @@ ibOutputWindow::ibOutputWindow(ibFrontendDocMDIFrame* parent, wxWindowID winid)
 
 ibOutputWindow* ibOutputWindow::GetOutputWindow()
 {
-	if (ibFrontendDocMDIFrameDesigner::GetFrame())
+	if (ibFrontendMainFrameDesigner::GetFrame())
 		return mainFrame->GetOutputWindow();
 	return nullptr; 
 }
@@ -253,7 +253,7 @@ void ibOutputWindow::OnDoubleClick(wxMouseEvent& event)
 
 				if (foundedDoc == nullptr) {
 					foundedDoc = dynamic_cast<ibMetaDataDocument*>(
-						docManager->CreateDocument(code.m_fileName, wxDOC_SILENT)
+						docManager->CreateDocument(code.m_fileName, ibDOC_SILENT)
 						);
 				}
 

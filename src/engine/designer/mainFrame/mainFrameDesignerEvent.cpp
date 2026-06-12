@@ -25,7 +25,7 @@
 
 #include "backend/metadataConfiguration.h"
 
-void ibFrontendDocMDIFrameDesigner::OnStartDebug(wxCommandEvent& WXUNUSED(event))
+void ibFrontendMainFrameDesigner::OnStartDebug(wxCommandEvent& WXUNUSED(event))
 {
 	if (debugClient->HasConnections()) {
 		wxMessageBox(_("Debugger is already running!"));
@@ -45,7 +45,7 @@ void ibFrontendDocMDIFrameDesigner::OnStartDebug(wxCommandEvent& WXUNUSED(event)
 	appData->RunApplication(wxT("enterprise"));
 }
 
-void ibFrontendDocMDIFrameDesigner::OnStartDebugWithoutDebug(wxCommandEvent& WXUNUSED(event))
+void ibFrontendMainFrameDesigner::OnStartDebugWithoutDebug(wxCommandEvent& WXUNUSED(event))
 {
 	if (activeMetaData->IsModified()) {
 		if (wxMessageBox(wxString::Format(_("Configuration '%s' has been changed.\nDo you want to save?"), activeMetaData->GetConfigName()), wxTheApp->GetAppDisplayName(), wxYES_NO | wxCENTRE | wxICON_QUESTION, this) == wxYES) {
@@ -92,7 +92,7 @@ static void LaunchWebDebug(wxWindow* parent, bool withDebug)
 	}
 }
 
-void ibFrontendDocMDIFrameDesigner::OnStartDebugWeb(wxCommandEvent& WXUNUSED(event))
+void ibFrontendMainFrameDesigner::OnStartDebugWeb(wxCommandEvent& WXUNUSED(event))
 {
 	if (debugClient->HasConnections()) {
 		wxMessageBox(_("Debugger is already running!"));
@@ -103,7 +103,7 @@ void ibFrontendDocMDIFrameDesigner::OnStartDebugWeb(wxCommandEvent& WXUNUSED(eve
 	LaunchWebDebug(this, /*withDebug=*/true);
 }
 
-void ibFrontendDocMDIFrameDesigner::OnStartDebugWithoutDebugWeb(wxCommandEvent& WXUNUSED(event))
+void ibFrontendMainFrameDesigner::OnStartDebugWithoutDebugWeb(wxCommandEvent& WXUNUSED(event))
 {
 	if (!SaveIfModifiedBeforeWebDebug(this))
 		return;
@@ -112,7 +112,7 @@ void ibFrontendDocMDIFrameDesigner::OnStartDebugWithoutDebugWeb(wxCommandEvent& 
 
 #include "win/dlg/debugItem/debugItem.h"
 
-void ibFrontendDocMDIFrameDesigner::OnAttachForDebugging(wxCommandEvent& WXUNUSED)
+void ibFrontendMainFrameDesigner::OnAttachForDebugging(wxCommandEvent& WXUNUSED)
 {
 	ibWindowPtr<ibDialogDebugItem> dlg(new ibDialogDebugItem(this, wxID_ANY));
 	dlg->Show();
@@ -124,7 +124,7 @@ void ibFrontendDocMDIFrameDesigner::OnAttachForDebugging(wxCommandEvent& WXUNUSE
 #include "docManager/docManager.h"
 #include "docManager/templates/docViewMetaFile.h"
 
-void ibFrontendDocMDIFrameDesigner::OnOpenConfiguration(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnOpenConfiguration(wxCommandEvent& event)
 {
 	ibMetaDataConfigurationBase* configDatabase = activeMetaData->GetConfiguration();
 	wxASSERT(configDatabase);
@@ -152,7 +152,7 @@ void ibFrontendDocMDIFrameDesigner::OnOpenConfiguration(wxCommandEvent& event)
 		newDocument->SetFilename(metaObject->GetDocPath());
 		newDocument->SetMetaObject(metaObject);
 
-		if (newDocument->OnCreate(metaObject->GetModuleName(), wxDOC_NEW)) {
+		if (newDocument->OnCreate(metaObject->GetModuleName(), ibDOC_NEW)) {
 			newDocument->SetCommandProcessor(newDocument->OnCreateCommandProcessor());
 			//newDocument->UpdateAllViews();
 		}
@@ -174,7 +174,7 @@ void ibFrontendDocMDIFrameDesigner::OnOpenConfiguration(wxCommandEvent& event)
 	}
 }
 
-void ibFrontendDocMDIFrameDesigner::OnRollbackConfiguration(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnRollbackConfiguration(wxCommandEvent& event)
 {
 	objectInspector->SelectObject(nullptr);
 
@@ -204,7 +204,7 @@ void ibFrontendDocMDIFrameDesigner::OnRollbackConfiguration(wxCommandEvent& even
 	}
 }
 
-void ibFrontendDocMDIFrameDesigner::OnUpdateConfiguration(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnUpdateConfiguration(wxCommandEvent& event)
 {
 	bool canSave = true;
 	if (debugClient->HasConnections()) {
@@ -266,7 +266,7 @@ void ibFrontendDocMDIFrameDesigner::OnUpdateConfiguration(wxCommandEvent& event)
 	}
 }
 
-void ibFrontendDocMDIFrameDesigner::OnLoadDatabase(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnLoadDatabase(wxCommandEvent& event)
 {
 	wxFileDialog openFileDialog(this, _("Open database file"), "", "",
 		"Database files (*.obk)|*.obk", wxFD_OPEN | wxFD_FILE_MUST_EXIST);
@@ -298,7 +298,7 @@ void ibFrontendDocMDIFrameDesigner::OnLoadDatabase(wxCommandEvent& event)
 
 	if (appData->LoadDatabase(openFileDialog.GetPath())) {
 		wxMessageBox(_("Loading of tasks completed successful. Restart the program!"));
-		ibSessionRegistry::Instance().CloseAll(true);
+		appData->GetSessionRegistry()->CloseAll(true);
 	}
 	else {
 		wxMessageBox(_("Error when trying to load database from a file!!"));
@@ -307,7 +307,7 @@ void ibFrontendDocMDIFrameDesigner::OnLoadDatabase(wxCommandEvent& event)
 	event.Skip();
 }
 
-void ibFrontendDocMDIFrameDesigner::OnSaveDatabase(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnSaveDatabase(wxCommandEvent& event)
 {
 	wxFileDialog saveFileDialog(this, _("Save database file"), "", "",
 		"Database files (*.obk)|*.obk", wxFD_SAVE | wxFD_OVERWRITE_PROMPT);
@@ -322,7 +322,7 @@ void ibFrontendDocMDIFrameDesigner::OnSaveDatabase(wxCommandEvent& event)
 	event.Skip();
 }
 
-void ibFrontendDocMDIFrameDesigner::OnClearDatabase(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnClearDatabase(wxCommandEvent& event)
 {
 	if (wxMessageBox(_("Are you sure you want to clear the database?"), wxTheApp->GetAppDisplayName(), wxYES_NO | wxCENTRE | wxICON_QUESTION, this) == wxNO)
 		return;
@@ -357,7 +357,7 @@ void ibFrontendDocMDIFrameDesigner::OnClearDatabase(wxCommandEvent& event)
 	event.Skip();
 }
 
-void ibFrontendDocMDIFrameDesigner::OnConfiguration(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnConfiguration(wxCommandEvent& event)
 {
 	if (wxID_DESIGNER_CONFIGURATION_LOAD_FROM_FILE == event.GetId())
 	{
@@ -397,7 +397,7 @@ void ibFrontendDocMDIFrameDesigner::OnConfiguration(wxCommandEvent& event)
 	}
 }
 
-void ibFrontendDocMDIFrameDesigner::OnRunDebugCommand(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnRunDebugCommand(wxCommandEvent& event)
 {
 	switch (event.GetId())
 	{
@@ -429,7 +429,7 @@ void ibFrontendDocMDIFrameDesigner::OnRunDebugCommand(wxCommandEvent& event)
 //*                                    Tool                                      *
 //********************************************************************************
 
-void ibFrontendDocMDIFrameDesigner::OnToolsSettings(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnToolsSettings(wxCommandEvent& event)
 {
 	ibDialogSettings dialog(this);
 
@@ -474,7 +474,7 @@ void ibFrontendDocMDIFrameDesigner::OnToolsSettings(wxCommandEvent& event)
 
 #include "frontend/win/dlgs/userList.h"
 
-void ibFrontendDocMDIFrameDesigner::OnUsers(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnUsers(wxCommandEvent& event)
 {
 	ibWindowPtr<ibDialogUserList> dlg(new ibDialogUserList(this, wxID_ANY));
 	dlg->Show();
@@ -482,7 +482,7 @@ void ibFrontendDocMDIFrameDesigner::OnUsers(wxCommandEvent& event)
 
 #include "frontend/win/dlgs/activeUser.h"
 
-void ibFrontendDocMDIFrameDesigner::OnActiveUsers(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnActiveUsers(wxCommandEvent& event)
 {
 	ibWindowPtr<ibDialogActiveUser> dlg(new ibDialogActiveUser(this, wxID_ANY));
 	dlg->Show();
@@ -490,7 +490,7 @@ void ibFrontendDocMDIFrameDesigner::OnActiveUsers(wxCommandEvent& event)
 
 #include "frontend/win/dlgs/connectionDB.h"
 
-void ibFrontendDocMDIFrameDesigner::OnConnection(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnConnection(wxCommandEvent& event)
 {
 	ibDialogConnection dlg(this, wxID_ANY);
 	dlg.ShowModal();
@@ -498,7 +498,7 @@ void ibFrontendDocMDIFrameDesigner::OnConnection(wxCommandEvent& event)
 
 #include "frontend/win/dlgs/about.h"
 
-void ibFrontendDocMDIFrameDesigner::OnAbout(wxCommandEvent& event)
+void ibFrontendMainFrameDesigner::OnAbout(wxCommandEvent& event)
 {
 	ibDialogAbout dlg(this, wxID_ANY);
 	dlg.ShowModal();

@@ -128,7 +128,7 @@ void ibAiMarkersPanel::RefreshFromOutputWindow()
 	// subsystem would add a second source loop here. Lines without a
 	// docPath OR fileName are dropped — they're plain log messages, not
 	// markers we can navigate to.
-	auto* frame = ibFrontendDocMDIFrameDesigner::GetFrame();
+	auto* frame = ibFrontendMainFrameDesigner::GetFrame();
 	if (frame == nullptr) return;
 	auto* out = frame->GetOutputWindow();
 	if (out == nullptr) return;
@@ -178,7 +178,7 @@ void ibAiMarkersPanel::OnRowActivated(wxListEvent& event)
 	    docManager->FindDocumentByPath(m.file));
 	if (found == nullptr) {
 		found = dynamic_cast<ibMetaDataDocument*>(
-		    docManager->CreateDocument(m.file, wxDOC_SILENT));
+		    docManager->CreateDocument(m.file, ibDOC_SILENT));
 	}
 	if (found == nullptr) {
 		wxLogStatus(_("Не удалось открыть документ: %s"), m.file);
@@ -221,7 +221,7 @@ void ibAiMarkersPanel::OnApplyAllFixes(wxCommandEvent& /*event*/)
 	// fix protocol exists, replace this block with the real apply call —
 	// the panel-level UX (confirm → walk rows → report N applied) stays
 	// the same.
-	auto* frame = ibFrontendDocMDIFrameDesigner::GetFrame();
+	auto* frame = ibFrontendMainFrameDesigner::GetFrame();
 	size_t applied = 0;
 	for (const auto& m : m_markers) {
 		if (m.fix.IsEmpty()) continue;

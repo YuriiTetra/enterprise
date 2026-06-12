@@ -87,7 +87,7 @@ wxString ComputeConfigHash()
 	wxString name;
 	// activeMetaData macro can resolve to nullptr if no configuration is
 	// loaded yet (designer cold-start, tests). Guard against that.
-	if (ibMetaDataConfigurationBase* cfg = ibMetaDataConfigurationBase::Get()) {
+	if (ibMetaDataConfigurationBase* cfg = activeMetaData) {
 		name = cfg->GetConfigName();
 	}
 	return ComputeConfigHashFor(name);

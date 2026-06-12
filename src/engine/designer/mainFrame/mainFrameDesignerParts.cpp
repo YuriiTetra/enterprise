@@ -29,7 +29,7 @@
 
 #include <algorithm>
 
-void ibFrontendDocMDIFrameDesigner::CreateWideGui()
+void ibFrontendMainFrameDesigner::CreateWideGui()
 {
 	m_mainFrameToolbar = new wxAuiToolBar(this, wxID_ANY, wxDefaultPosition, wxDefaultSize, wxAUI_TB_HORZ_LAYOUT);
 	m_mainFrameToolbar->SetToolBitmapSize(wxSize(16, 16));
@@ -103,7 +103,7 @@ void ibFrontendDocMDIFrameDesigner::CreateWideGui()
 #include "frontend/win/ctrls/floatingNotebook.h"
 #include "frontend/win/theme/luna_tabart.h"
 
-void ibFrontendDocMDIFrameDesigner::CreateBottomPane()
+void ibFrontendMainFrameDesigner::CreateBottomPane()
 {
 	if (m_mgr.GetPane(wxAUI_PANE_BOTTOM).IsOk())
 		return;
@@ -138,7 +138,7 @@ void ibFrontendDocMDIFrameDesigner::CreateBottomPane()
 	m_mgr.AddPane(auiNotebook, paneInfo);
 }
 
-void ibFrontendDocMDIFrameDesigner::CreateMetadataPane()
+void ibFrontendMainFrameDesigner::CreateMetadataPane()
 {
 	if (m_mgr.GetPane(wxAUI_PANE_METADATA).IsOk())
 		return;
@@ -156,7 +156,7 @@ void ibFrontendDocMDIFrameDesigner::CreateMetadataPane()
 	m_mgr.AddPane(m_metaWindow, paneInfo);
 }
 
-void ibFrontendDocMDIFrameDesigner::EnsureProjectSearchPane()
+void ibFrontendMainFrameDesigner::EnsureProjectSearchPane()
 {
 	if (m_mgr.GetPane(wxAUI_PANE_PROJECT_SEARCH).IsOk()) return;
 
@@ -178,7 +178,7 @@ void ibFrontendDocMDIFrameDesigner::EnsureProjectSearchPane()
 	m_mgr.Update();
 }
 
-void ibFrontendDocMDIFrameDesigner::ToggleProjectSearchPane()
+void ibFrontendMainFrameDesigner::ToggleProjectSearchPane()
 {
 	const bool firstCreate = !m_mgr.GetPane(wxAUI_PANE_PROJECT_SEARCH).IsOk();
 	EnsureProjectSearchPane();
@@ -188,7 +188,7 @@ void ibFrontendDocMDIFrameDesigner::ToggleProjectSearchPane()
 	m_mgr.Update();
 }
 
-void ibFrontendDocMDIFrameDesigner::FocusProjectSearchPane()
+void ibFrontendMainFrameDesigner::FocusProjectSearchPane()
 {
 	EnsureProjectSearchPane();
 	wxAuiPaneInfo& pane = m_mgr.GetPane(wxAUI_PANE_PROJECT_SEARCH);
@@ -209,7 +209,7 @@ void ibFrontendDocMDIFrameDesigner::FocusProjectSearchPane()
 // keep cold-start cost flat for users who never open the pane.
 // ---------------------------------------------------------------------------
 
-void ibFrontendDocMDIFrameDesigner::EnsureAiTodoPane()
+void ibFrontendMainFrameDesigner::EnsureAiTodoPane()
 {
 	if (m_mgr.GetPane(wxAUI_PANE_AI_TODO).IsOk()) return;
 
@@ -231,7 +231,7 @@ void ibFrontendDocMDIFrameDesigner::EnsureAiTodoPane()
 	m_mgr.Update();
 }
 
-void ibFrontendDocMDIFrameDesigner::ToggleAiTodoPane()
+void ibFrontendMainFrameDesigner::ToggleAiTodoPane()
 {
 	const bool firstCreate = !m_mgr.GetPane(wxAUI_PANE_AI_TODO).IsOk();
 	EnsureAiTodoPane();
@@ -241,7 +241,7 @@ void ibFrontendDocMDIFrameDesigner::ToggleAiTodoPane()
 	m_mgr.Update();
 }
 
-void ibFrontendDocMDIFrameDesigner::FocusAiTodoPane()
+void ibFrontendMainFrameDesigner::FocusAiTodoPane()
 {
 	EnsureAiTodoPane();
 	wxAuiPaneInfo& pane = m_mgr.GetPane(wxAUI_PANE_AI_TODO);
@@ -258,7 +258,7 @@ void ibFrontendDocMDIFrameDesigner::FocusAiTodoPane()
 // AI Assistant Markers pane (Workmate parity).
 // ---------------------------------------------------------------------------
 
-void ibFrontendDocMDIFrameDesigner::EnsureAiMarkersPane()
+void ibFrontendMainFrameDesigner::EnsureAiMarkersPane()
 {
 	if (m_mgr.GetPane(wxAUI_PANE_AI_MARKERS).IsOk()) return;
 
@@ -280,7 +280,7 @@ void ibFrontendDocMDIFrameDesigner::EnsureAiMarkersPane()
 	m_mgr.Update();
 }
 
-void ibFrontendDocMDIFrameDesigner::ToggleAiMarkersPane()
+void ibFrontendMainFrameDesigner::ToggleAiMarkersPane()
 {
 	const bool firstCreate = !m_mgr.GetPane(wxAUI_PANE_AI_MARKERS).IsOk();
 	EnsureAiMarkersPane();
@@ -290,7 +290,7 @@ void ibFrontendDocMDIFrameDesigner::ToggleAiMarkersPane()
 	m_mgr.Update();
 }
 
-void ibFrontendDocMDIFrameDesigner::FocusAiMarkersPane()
+void ibFrontendMainFrameDesigner::FocusAiMarkersPane()
 {
 	EnsureAiMarkersPane();
 	wxAuiPaneInfo& pane = m_mgr.GetPane(wxAUI_PANE_AI_MARKERS);
@@ -300,7 +300,7 @@ void ibFrontendDocMDIFrameDesigner::FocusAiMarkersPane()
 	}
 }
 
-void ibFrontendDocMDIFrameDesigner::UpdateEditorOptions()
+void ibFrontendMainFrameDesigner::UpdateEditorOptions()
 {
 	for (auto& doc : m_docManager->GetDocumentsVector())
 		doc->UpdateAllViews();
@@ -308,15 +308,15 @@ void ibFrontendDocMDIFrameDesigner::UpdateEditorOptions()
 	m_outputWindow->SetFontColorSettings(GetFontColorSettings());
 }
 
-#include "frontend/help/helpPaneView.h"
-#include "frontend/help/helpChooserDialog.h"
+#include "frontend/syntaxHelper/helpPaneView.h"
+#include "frontend/syntaxHelper/helpChooserDialog.h"
 #include "frontend/win/editor/codeEditor/codeEditor.h"
 #include "backend/appData.h"
-#include "backend/help/helpCorpus.h"
-#include "backend/help/helpResolver.h"
-#include "backend/help/helpEntry.h"
+#include "backend/syntaxHelper/helpCorpus.h"
+#include "backend/syntaxHelper/helpResolver.h"
+#include "backend/syntaxHelper/helpEntry.h"
 
-void ibFrontendDocMDIFrameDesigner::EnsureHelpPane()
+void ibFrontendMainFrameDesigner::EnsureHelpPane()
 {
 	wxLogMessage(wxT("[help-host] EnsureHelpPane enter; pane.IsOk()=%d, m_helpPane=%p"),
 	             m_mgr.GetPane(wxAUI_PANE_HELP).IsOk() ? 1 : 0,
@@ -359,7 +359,7 @@ void ibFrontendDocMDIFrameDesigner::EnsureHelpPane()
 	}
 }
 
-void ibFrontendDocMDIFrameDesigner::ToggleHelpPane()
+void ibFrontendMainFrameDesigner::ToggleHelpPane()
 {
 	const bool firstCreate = !m_mgr.GetPane(wxAUI_PANE_HELP).IsOk();
 	EnsureHelpPane();
@@ -372,7 +372,7 @@ void ibFrontendDocMDIFrameDesigner::ToggleHelpPane()
 	m_mgr.Update();
 }
 
-void ibFrontendDocMDIFrameDesigner::OpenHelpForCursor()
+void ibFrontendMainFrameDesigner::OpenHelpForCursor()
 {
 	wxLogMessage(wxT("[help-host] OpenHelpForCursor enter"));
 	EnsureHelpPane();
@@ -440,7 +440,7 @@ void ibFrontendDocMDIFrameDesigner::OpenHelpForCursor()
 // m_pluginWebPaneIds tracks which ids belong to us for SaveOptions.
 // ---------------------------------------------------------------------------
 
-void ibFrontendDocMDIFrameDesigner::WirePluginWebPaneCallbacks()
+void ibFrontendMainFrameDesigner::WirePluginWebPaneCallbacks()
 {
 	if (m_pluginWebPaneCallbacksRegistered) return;
 	auto* pm = appData->GetPluginManager();

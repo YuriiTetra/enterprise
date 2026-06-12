@@ -92,7 +92,7 @@ void CollectFromMetadata(const wxString& prefix,
                           std::vector<Suggestion>& out)
 {
 	if (out.size() >= cap) return;
-	ibMetaDataConfigurationBase* cfg = ibMetaDataConfigurationBase::Get();
+	ibMetaDataConfigurationBase* cfg = activeMetaData;
 	if (cfg == nullptr) return;
 	ibValueMetaObjectConfiguration* root = cfg->GetCommonMetaObject();
 	if (root == nullptr) return;
@@ -235,7 +235,7 @@ wxString RenderMetadataBlock(const wxString& token)
 	// active metadata tree.
 	wxString fullName = token;
 	if (fullName.Find(wxT('.')) == wxNOT_FOUND) {
-		ibMetaDataConfigurationBase* cfg = ibMetaDataConfigurationBase::Get();
+		ibMetaDataConfigurationBase* cfg = activeMetaData;
 		if (cfg == nullptr) return wxEmptyString;
 		ibValueMetaObjectConfiguration* root = cfg->GetCommonMetaObject();
 		if (root == nullptr) return wxEmptyString;

@@ -316,7 +316,7 @@ void ibProjectSearchPanel::NavigateTo(const Hit& hit)
 		return;
 	}
 
-	auto* frame = ibFrontendDocMDIFrameDesigner::GetFrame();
+	auto* frame = ibFrontendMainFrameDesigner::GetFrame();
 	if (frame == nullptr) return;
 
 	// Public accessor on the designer frame — keeps us out of AUI

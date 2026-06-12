@@ -208,7 +208,7 @@ void ibAiTodoPanel::OnRowActivated(wxListEvent& event)
 			// Show every registered pane — the chat pane is the most common
 			// outcome and there is no "is chat pane" predicate in the
 			// pluginManager surface today. Best-effort focus shifting.
-			auto* frame = ibFrontendDocMDIFrameDesigner::GetFrame();
+			auto* frame = ibFrontendMainFrameDesigner::GetFrame();
 			(void)frame;  // intentionally not navigating across AUI
 		}
 		if (m_statusLine) {
@@ -273,7 +273,7 @@ void ibAiTodoPanel::DispatchToAiPane(const wxString& title)
 {
 	auto* pm = appData ? appData->GetPluginManager() : nullptr;
 	if (pm == nullptr) return;
-	auto* frame = ibFrontendDocMDIFrameDesigner::GetFrame();
+	auto* frame = ibFrontendMainFrameDesigner::GetFrame();
 	if (frame == nullptr) return;
 
 	// Pick the first AI chat pane registered (most builds register exactly

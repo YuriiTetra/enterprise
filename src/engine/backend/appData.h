@@ -52,7 +52,7 @@ enum ibDatabaseMode {
 
 class BACKEND_API ibDatabaseLayer;
 class BACKEND_API ibSession;
-class BACKEND_API ibHelpService;  // defined in backend/help/helpService.h
+class BACKEND_API ibHelpService;  // defined in backend/syntaxHelper/helpService.h
 enum class ibSessionKind : int;   // defined in backend/session/session.h
 
 // ibSessionSnapshot — cluster-wide sys_session snapshot — moved to
@@ -325,6 +325,7 @@ public:
 	const ibUserInfo& GetUserInfo() const;
 
 	wxString GetComputerName() const { return m_strComputer; }
+	const wxString& GetFileDirectory() const { return m_strFile; } // config working dir (file mode)
 
 	wxString GetLocale() const { return m_locale.GetCanonicalName(); }
 
