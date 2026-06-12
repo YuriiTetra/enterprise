@@ -13,11 +13,12 @@
 #include <wx/textctrl.h>
 #include <wx/sizer.h>
 #include <wx/button.h>
+#include <wx/bitmap.h>
+#include <wx/image.h>
+#include <wx/icon.h>
 #include <wx/frame.h>
 #include <wx/radiobut.h>
-#include <wx/stdpaths.h>
-#include <wx/event.h>
-#include <wx/generic/dirctrlg.h>
+#include <wx/filepicker.h>
 
 #include "frontend/frontend.h"
 
@@ -30,8 +31,7 @@ class ibDialogConnection : public wxDialog {
 
 	// File mode controls
 	wxStaticText* m_staticTextFilePath;
-	wxTextCtrl* m_textCtrlFilePath;
-	wxButton* m_buttonBrowseFile;
+	wxDirPickerCtrl* m_dirPickerFile;
 
 	// Server mode controls
 	wxStaticText* m_staticTextServer;
@@ -52,7 +52,6 @@ class ibDialogConnection : public wxDialog {
 	wxButton* m_buttonSaveConnection;
 
 	void UpdateModeVisibility();
-	void BrowseFile();
 
 public:
 
@@ -69,7 +68,7 @@ public:
 
 	bool IsFileMode() const { return m_radioFile->GetValue(); }
 	wxString GetNameIB() const { return m_textCtrlName->GetValue(); }
-	wxString GetFilePath() const { return m_textCtrlFilePath->GetValue(); }
+	wxString GetFilePath() const { return m_dirPickerFile->GetPath(); }
 	wxString GetServer() const { return m_textCtrlServer->GetValue(); }
 	wxString GetPort() const { return m_textCtrlPort->GetValue(); }
 	wxString GetDBName() const { return m_textCtrlDataBase->GetValue(); }
@@ -78,8 +77,6 @@ public:
 
 protected:
 	void OnModeChanged(wxCommandEvent& event);
-	void BrowseFileOnButtonClick(wxCommandEvent& event);
-	void BrowseFileOnMouseUp(wxMouseEvent& event);
 	void TestConnectionOnButtonClick(wxCommandEvent& event);
 	void SaveConnectionOnButtonClick(wxCommandEvent& event);
 };

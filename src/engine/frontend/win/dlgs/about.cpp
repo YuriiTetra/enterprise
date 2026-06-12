@@ -4,18 +4,11 @@
 #include "backend/appData.h"
 #include "backend/plugin/pluginManager.h"
 
-// Contributors string is built per-call so wxGetTranslation hits the live
-// catalog (a `static const wxString = _(...)` would freeze the English
-// form before the locale's .mo is loaded).
-static wxString ContributorsText() {
-	return _("wxWidgets and wxFormBuilder, Unknown Worlds Entertainment team")
-	       + wxString(wxT("\n"))
-	       + _("2C team, whose ideas were taken as the basis for building the interpreter")
-	       + wxString(wxT("\n"))
-	       + _("Tomasz Sowa who developed ttmath")
-	       + wxString(wxT("\n"))
-	       + _("And also everyone who was not mentioned here");
-}
+static const wxString s_strContributors =
+	wxT("wxWidgets and wxFormBuilder, Unknown Worlds Entertaiment team\n")
+	wxT("2C team, whose ideas were taken as the basis for building the interpreter\n")
+	wxT("Tomasz Sowa which developed ttmath\n")
+	wxT("And also everyone who was not mentioned here");
 
 namespace {
 
@@ -53,18 +46,18 @@ ibDialogAbout::ibDialogAbout(wxWindow* parent, int id)
 
 	// --- Header block (title, subtitle, copyright link) ---
 	m_staticTextHeader = new wxStaticText(this, wxID_ANY,
-		wxString::Format(_("Open Enterprise Solutions, build %i"), GetBuildId()),
+		wxString::Format(wxT("Open Enterprise Solutions, build %i"), GetBuildId()),
 		wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER_HORIZONTAL);
 	m_staticTextHeader->SetFont(headerFont);
 	root->Add(m_staticTextHeader, 0, wxEXPAND | wxTOP | wxLEFT | wxRIGHT, kPad * 2);
 
 	m_staticTextFramework = new wxStaticText(this, wxID_ANY,
-		_("a RAD tool powered by wxWidgets framework"),
+		wxT("a RAD tool powered by wxWidgets framework"),
 		wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER_HORIZONTAL);
 	root->Add(m_staticTextFramework, 0, wxEXPAND | wxLEFT | wxRIGHT | wxTOP, kPad);
 
 	m_staticTextCommunity = new wxStaticText(this, wxID_ANY,
-		_("(c) 2026 OES community"),
+		wxT("(c) 2026 OES community"),
 		wxDefaultPosition, wxDefaultSize, wxALIGN_CENTER_HORIZONTAL);
 	m_staticTextCommunity->SetFont(linkFont);
 	m_staticTextCommunity->SetForegroundColour(wxSystemSettings::GetColour(wxSYS_COLOUR_HOTLIGHT));
@@ -112,25 +105,16 @@ ibDialogAbout::ibDialogAbout(wxWindow* parent, int id)
 
 			wxString text;
 			for (const auto& p : plugins) {
-				if (p.m_info == nullptr) continue;
-				const wxString name   = wxString::FromUTF8(p.m_info->name        ? p.m_info->name        : "?");
-				const wxString ver    = wxString::FromUTF8(p.m_info->version     ? p.m_info->version     : "");
-				const wxString desc   = wxString::FromUTF8(p.m_info->description ? p.m_info->description : "");
-				const wxString vendor = wxString::FromUTF8(p.m_info->vendor      ? p.m_info->vendor      : "");
-				text << name;
-				if (!ver.IsEmpty())    text << wxT("  ") << ver;
-				if (!vendor.IsEmpty()) text << wxT("   — ") << vendor;
-				text << wxT("\n");
-				if (!desc.IsEmpty()) {
-					text << wxT("    ") << desc << wxT("\n");
-				}
-				text << wxT("\n");
+				text << wxString::FromUTF8(p.m_info->name ? p.m_info->name : "?")
+					<< wxT("  ")
+					<< wxString::FromUTF8(p.m_info->version ? p.m_info->version : "")
+					<< wxT("\n");
 			}
-			while (!text.IsEmpty() && (text.Last() == wxT('\n') || text.Last() == wxT(' ')))
+			if (!text.empty() && text.Last() == wxT('\n'))
 				text.RemoveLast();
 
 			wxTextCtrl* list = new wxTextCtrl(pluginsSizer->GetStaticBox(), wxID_ANY,
-				text, wxDefaultPosition, FromDIP(wxSize(-1, 120)),
+				text, wxDefaultPosition, FromDIP(wxSize(-1, 48)),
 				wxTE_MULTILINE | wxTE_READONLY | wxBORDER_NONE);
 			list->SetBackgroundColour(pluginsSizer->GetStaticBox()->GetBackgroundColour());
 			pluginsSizer->Add(list, 1, wxEXPAND | wxALL, kPad);
@@ -145,7 +129,7 @@ ibDialogAbout::ibDialogAbout(wxWindow* parent, int id)
 	m_staticTextThanks = nullptr;
 
 	m_textCtrlContributors = new wxTextCtrl(thanksSizer->GetStaticBox(), wxID_ANY,
-		ContributorsText(), wxDefaultPosition, FromDIP(wxSize(-1, 64)),
+		s_strContributors, wxDefaultPosition, FromDIP(wxSize(-1, 64)),
 		wxTE_MULTILINE | wxTE_READONLY | wxBORDER_NONE);
 	m_textCtrlContributors->SetBackgroundColour(thanksSizer->GetStaticBox()->GetBackgroundColour());
 	thanksSizer->Add(m_textCtrlContributors, 1, wxEXPAND | wxALL, kPad);

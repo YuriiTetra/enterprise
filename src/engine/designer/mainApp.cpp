@@ -281,7 +281,7 @@ int ibAppDesigner::OnExit()
 	if (auto* registry = ibApplicationData::GetSessionRegistry())
 		registry->Stop();
 
-	bool success_exit = wxApp::OnExit();
+	bool suсcess_exit = wxApp::OnExit();
 
 	appDataDestroy();
 
@@ -291,5 +291,5 @@ int ibAppDesigner::OnExit()
 		wxTheClipboard->Close();
 	}
 
-	return success_exit;
+	return suсcess_exit;
 }

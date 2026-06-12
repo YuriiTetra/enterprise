@@ -4,9 +4,7 @@
 ////////////////////////////////////////////////////////////////////////////
 
 #include "mainFrameDesigner.h"
-#include "frontend/syntaxHelper/helpPaneView.h"
 #include "backend/debugger/debugClient.h"
-#include "backend/appData.h"
 
 #include <wx/config.h>
 #include <wx/fileconf.h>
@@ -15,7 +13,6 @@
 
 #include "docManager/docManager.h"
 #include "debugger/debugClientImpl.h"
-#include "externalMutationNotifier.h"
 
 ///////////////////////////////////////////////////////////////////
 
@@ -48,33 +45,7 @@ ibFrontendMainFrameDesigner::ibFrontendMainFrameDesigner(const wxString& title,
 
 ibFrontendMainFrameDesigner::~ibFrontendMainFrameDesigner()
 {
-	// MCP concurrency: stop polling before dropping the notifier — the
-	// timer would otherwise fire after the heap entry behind m_frame is
-	// gone. wxDELETE on m_externalMutationNotifier triggers its dtor's
-	// Stop() but explicit stop here removes any race window.
-	if (m_externalMutationNotifier != nullptr) {
-		m_externalMutationNotifier->Stop();
-	}
-	wxDELETE(m_externalMutationNotifier);
 	wxDELETE(m_docManager);
-}
-
-void ibFrontendMainFrameDesigner::StartExternalMutationNotifier(const wxString& configDir)
-{
-	// MCP concurrency Layer 3: lazy-init on first open. Outliving the
-	// frame is impossible — the dtor deletes the notifier before the
-	// frame's heap entry is freed.
-	if (m_externalMutationNotifier == nullptr) {
-		m_externalMutationNotifier = new ibExternalMutationNotifier(this);
-	}
-	m_externalMutationNotifier->Start(configDir);
-}
-
-void ibFrontendMainFrameDesigner::StopExternalMutationNotifier()
-{
-	if (m_externalMutationNotifier != nullptr) {
-		m_externalMutationNotifier->Stop();
-	}
 }
 
 void ibFrontendMainFrameDesigner::CreateGUI()
@@ -154,32 +125,6 @@ void ibFrontendMainFrameDesigner::LoadOptions()
 				}
 				node = node->GetNext();
 			}
-			// Help pane state — extract immediately into the
-			// pending struct so the values survive after `document`
-			// goes out of scope. Applied lazily inside EnsureHelpPane.
-			for (wxXmlNode* h = root->GetChildren(); h; h = h->GetNext()) {
-				if (h->GetName() != wxT("helpPane")) continue;
-				m_pendingHelpState.has = true;
-				m_pendingHelpState.currentId = h->GetAttribute(wxT("currentId"), wxEmptyString);
-				h->GetAttribute(wxT("tab"),       wxEmptyString).ToLong(&m_pendingHelpState.tab);
-				h->GetAttribute(wxT("fontBoost"), wxEmptyString).ToLong(&m_pendingHelpState.fontBoost);
-				break;
-			}
-			// Plugin WebView pane visibility — multi-paneId map. Applied
-			// later inside WirePluginWebPaneCallbacks at RegisterWebPane
-			// time because the plugin that owns each pane hasn't loaded
-			// yet at this point. visible="1" → AUI Show(true) on registration.
-			for (wxXmlNode* s = root->GetChildren(); s; s = s->GetNext()) {
-				if (s->GetName() != wxT("pluginWebPanes")) continue;
-				for (wxXmlNode* p = s->GetChildren(); p; p = p->GetNext()) {
-					if (p->GetName() != wxT("pane")) continue;
-					const wxString id = p->GetAttribute(wxT("id"), wxEmptyString);
-					if (id.IsEmpty()) continue;
-					m_pendingPluginWebPaneVisible[id] =
-						p->GetAttribute(wxT("visible"), wxT("0")) == wxT("1");
-				}
-				break;
-			}
 		}
 	}
 
@@ -189,16 +134,11 @@ void ibFrontendMainFrameDesigner::LoadOptions()
 
 	m_keyBinder.AddCommandsFromMenuBar(mb);
 
-	// Always start from defaults so command ids added after the user's
-	// options.xml was written still receive their shipped shortcuts.
-	// Load() then overlays any user-customised bindings on top — its
-	// callees overwrite the keys vector on a per-command basis, so
-	// untouched ids keep their defaults. Without this, every newly
-	// added shortcut (Ctrl+F1 / RawCtrl+F1 / etc.) silently fails to
-	// install on existing installations.
-	SetDefaultHotKeys();
 	if (keyBindingNode != nullptr) {
 		m_keyBinder.Load(keyBindingNode);
+	}
+	else {
+		SetDefaultHotKeys();
 	}
 
 	m_keyBinder.UpdateWindow(this);
@@ -225,36 +165,6 @@ void ibFrontendMainFrameDesigner::SaveOptions()
 
 	// Save the key bindings.
 	root->AddChild(m_keyBinder.Save("keybindings"));
-
-	// Save help-pane state (last entry / tab / font boost). No-op when
-	// the pane was never opened in this session.
-	if (m_helpPane)
-		m_helpPane->SaveStateToXml(root);
-
-	// Save plugin WebView pane visibility per paneId. Walks the live AUI
-	// pane registry (m_pluginWebPaneIds is the set we know about) rather
-	// than caching pointers — a pane the user closed mid-session is gone
-	// from the AUI manager and gets visible="0" written. Pre-loaded
-	// entries that were never re-registered this session are preserved
-	// verbatim so a plugin temporarily uninstalled doesn't lose its
-	// remembered visibility.
-	{
-		std::unordered_map<wxString, bool> combined = m_pendingPluginWebPaneVisible;
-		for (const wxString& paneId : m_pluginWebPaneOrder) {
-			wxAuiPaneInfo& info = m_mgr.GetPane(paneId);
-			combined[paneId] = info.IsOk() && info.IsShown();
-		}
-		if (!combined.empty()) {
-			wxXmlNode* sp = new wxXmlNode(wxXML_ELEMENT_NODE, wxT("pluginWebPanes"));
-			for (const auto& kv : combined) {
-				wxXmlNode* p = new wxXmlNode(wxXML_ELEMENT_NODE, wxT("pane"));
-				p->AddAttribute(wxT("id"),      kv.first);
-				p->AddAttribute(wxT("visible"), kv.second ? wxT("1") : wxT("0"));
-				sp->AddChild(p);
-			}
-			root->AddChild(sp);
-		}
-	}
 
 	wxString directory =
 		wxStandardPaths::Get().GetUserDir(wxStandardPaths::Dir::Dir_Cache) + wxT("\\OES");

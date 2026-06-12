@@ -46,8 +46,6 @@ target_link_libraries(frontend
         wx::base
         wx::net
         wx::xml
-        wx::webview
-        md4c-html        # vendored CommonMark→HTML renderer
 )
 
 set_target_properties(frontend PROPERTIES
@@ -155,11 +153,6 @@ set(WFRONTEND_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/visualView/ctrl/tableBoxColumn_res.cpp
 )
 
-# Web frontend variant. DEFERRED: the OES_USE_WEB build of docView/docManager
-# #ifndef-guards out the desktop doc/view symbols, leaving the vtable/ctor with
-# undefined references (a pre-existing develop issue, unrelated to the
-# syntax-helper integration). Off by default until the web doc/view stubs land.
-if(OES_BUILD_WFRONTEND)
 add_library(wfrontend SHARED ${WFRONTEND_SOURCES})
 
 target_include_directories(wfrontend
@@ -198,4 +191,3 @@ set_target_properties(wfrontend PROPERTIES
     POSITION_INDEPENDENT_CODE ON
     OUTPUT_NAME "wfrontend"
 )
-endif() # OES_BUILD_WFRONTEND

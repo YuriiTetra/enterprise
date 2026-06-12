@@ -39,31 +39,6 @@
 // so the db_query macro's target stays stable; legacy call sites
 // continue to see ibApplicationData::GetDatabaseLayer as the entry
 // point even as the pool grows more responsibilities.
-#include "backend/syntaxHelper/helpService.h"
-
-static thread_local bool gs_designerDataWrite = false;
-
-bool ibApplicationData::DesignerDataWriteEnabled()
-{
-	return gs_designerDataWrite;
-}
-
-ibApplicationData::ScopedDesignerDataWrite::ScopedDesignerDataWrite()
-	: m_previous(gs_designerDataWrite)
-{
-	gs_designerDataWrite = true;
-}
-
-ibApplicationData::ScopedDesignerDataWrite::~ScopedDesignerDataWrite()
-{
-	gs_designerDataWrite = m_previous;
-}
-
-std::shared_ptr<const ibHelpCorpus> ibApplicationData::GetHelpCorpus() const
-{
-	return m_helpService ? m_helpService->GetCorpus() : nullptr;
-}
-
 std::shared_ptr<ibDatabaseLayer> ibApplicationData::GetDatabaseLayer()
 {
 	return ibConnectionPool::GetDatabaseLayer();

@@ -1,5 +1,4 @@
 // =============================================================================
-#include <wx/debug.h>
 // OES Enterprise — compiler pipeline tests
 //
 // Covers the lex → compile → bytecode emission stages without running the

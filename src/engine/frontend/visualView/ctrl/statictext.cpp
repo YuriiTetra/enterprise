@@ -33,7 +33,7 @@ wxObject* ibValueStaticText::Create(ibFrontendWindow* wxparent, ibVisualHost* vi
 #endif
 }
 
-void ibValueStaticText::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost* visualHost, bool firstCreated)
+void ibValueStaticText::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost* visualHost, bool firstСreated)
 {
 }
 

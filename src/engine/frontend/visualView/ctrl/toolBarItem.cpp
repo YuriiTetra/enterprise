@@ -48,10 +48,10 @@ wxObject* ibValueToolBarItem::Create(ibFrontendWindow* /*wxparent*/, ibVisualHos
 #endif
 }
 
-void ibValueToolBarItem::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost* visualHost, bool firstCreated)
+void ibValueToolBarItem::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost* visualHost, bool firstСreated)
 {
 #ifdef OES_USE_WEB
-	(void)wxobject; (void)wxparent; (void)visualHost; (void)firstCreated;
+	(void)wxobject; (void)wxparent; (void)visualHost; (void)firstСreated;
 	// Web: Create already built the shim; nothing live to poke.
 #else
 	ibAuiToolBar* toolbar = dynamic_cast<ibAuiToolBar*>(wxparent);
@@ -309,10 +309,10 @@ wxObject* ibValueToolBarSeparator::Create(ibFrontendWindow* /*wxparent*/, ibVisu
 #endif
 }
 
-void ibValueToolBarSeparator::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost* visualHost, bool firstCreated)
+void ibValueToolBarSeparator::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost* visualHost, bool firstСreated)
 {
 #ifdef OES_USE_WEB
-	(void)wxobject; (void)wxparent; (void)visualHost; (void)firstCreated;
+	(void)wxobject; (void)wxparent; (void)visualHost; (void)firstСreated;
 #else
 	ibAuiToolBar* toolbar = dynamic_cast<ibAuiToolBar*>(visualHost->GetWxObject(GetParent()));
 	wxASSERT(toolbar);

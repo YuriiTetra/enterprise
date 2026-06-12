@@ -1,4 +1,80 @@
-# Syntax helper — 1C-style interactive language reference
+# Syntax helper — interactive language reference panel
+
+> **Status:** LANDED (partial) 2026-05-26 — backend corpus + designer
+> panel + editor look-up + pack-on-build. Deferred: editor margin
+> `...` marker (Phase 1.3 nice-to-have), `helpEditor.exe` standalone
+> utility, per-configuration corpus (Phase 5), web HTTP endpoints
+> (Phase 6), help editor + review gate (Phase 7), skeleton generator
+> + LLM fill + validation gate (Phase 2). Full breakdown below.
+
+## Implementation status (2026-05-26)
+
+First port from `feature/syntax-helper` (upstream branch) landed on
+`feature/syntax-helper-port` with a stricter scope — backend +
+designer panel + editor look-up + pack-on-build only. AI / MCP /
+template-wizard / pluginWebPane work from the same upstream branch
+stays out of this PR.
+
+### Done
+
+| Subphase | What | Verification |
+|---|---|---|
+| 1.1 | `backend/syntaxHelper/` — `ibHelpEntry / Corpus / Loader / Resolver / Category / LoadError` (9 files from upstream, ~1.5k lines) | clean Debug\|Win32 build |
+| 1.1 | `ibHelpService` — owned subsystem on `ibApplicationData` (pattern: logger / lockManager); `CanonicaliseLocale` open-set first-2-chars, fallback "en"; graceful fallback when locale dir missing | smoke: launcher / designer start without crash |
+| 1.1b | `HelpBucketSource` abstraction with `FileSystemSource` (dev) + `ZipSource` (prod, `wxConvUTF8` decode + `./` strip + empty-name skip) | `.hlk` round-trip parses cleanly |
+| 1.1b | Pack-on-build via `[System.IO.Compression.ZipFile]::CreateFromDirectory` (MSBuild) + `cmake -E tar c --format=zip` (CMake); output `<exe>/help/<locale>.hlk` | `bin\Win32\Debug\help\{en,ru,uk}.hlk` produced on every build |
+| 1.2 | `frontend/syntaxHelper/` — 14 view files (PaneView / TreeView / IndexView / SearchView / DetailView / ChooserDialog / DragSource) | panel renders in designer |
+| 1.2 | AUI pane (`wxAUI_PANE_HELP = "syntaxHelperWindow"`); `EnsureHelpPane` / `ToggleHelpPane` lazy lifecycle on `ibFrontendDocMDIFrameDesigner` | Help → Syntax Helper toggles the pane |
+| 1.3 | `ibCodeEditor::GetIdentifierUnderCursor` + `OpenHelpForCursor` resolver pipeline + chooser dialog wiring; RawCtrl+Alt+F1 (pane toggle), RawCtrl+F1 (cursor look-up) | live lookup via menu + shortcut |
+| 1.3b | Editor right-click context menu (Cut/Copy/Paste/SelectAll + Look up in Syntax Helper) routing wxEVT_MENU upward through the parent chain | context menu item posts to host designer |
+| 1.3c | Drag target — wxStyledTextCtrl built-in handles `wxTextDataObject` from `helpDragSource` | drag from panel into editor inserts identifier |
+| - | UTF-8 BOM on 25 syntax-helper source files (MSVC without `/utf-8` flag was producing em-dash mojibake in `_()` literals) | no `вЂ—` in panel labels |
+| - | `.hbk → .hlk` rename across loader / service / build / docs (avoids collision with 1С proprietary `.hbk` format) | `bin/help/*.hlk` artefacts |
+| - | Menu items live in Help menu (was Tools, moved per user preference); macOS macro-Help-menu interception risk noted in comment | designer Help menu carries Syntax Helper + Look up + About |
+| - | Compact appData footprint: +13 lines `.h` (forward decl + member + static getter) / +6 lines `.cpp` (include + lazy init in `InitLocale`); ownership mirrors `ibLogger` / `ibLockManager` | no `m_helpCorpus` / `RebuildHelpCorpus` directly on appData |
+| - | `CMakePresets.json` (8 presets for VS-based CMake `Open Folder` workflow) | VS 2022 picks presets from dropdown |
+
+### TODO (deferred)
+
+| Subphase | What | Why deferred |
+|---|---|---|
+| 1.3 | Editor margin marker `DEF_HELP_HINT_ID=3` with `...` next to call expressions | Phase 4 nice-to-have; needs precompile-context plumbing to know "is the cursor inside a call expression"; ships well after basic look-up is in user hands |
+| 1.4 | `helpEditor.exe` standalone utility for content editing | Scope questions outstanding (layout / editable fields / markdown preview / validation / reviewed-flip / locale switching) — start after user picks defaults |
+| 5 | Per-configuration corpus tier (`appData->GetConfigCacheDir()/help/<locale>/`) for metadata-driven entries (Catalog/Document attributes & methods) | Needs configuration-save hook + per-config rebuild trigger; out of scope until first user complains the platform corpus misses their custom Catalog attribute |
+| 6 | Web HTTP endpoints `/api/help/{tree,entry/<id>,resolve,search}` on wenterprise-server | wfrontend has no consumer yet (no React shell touching it); deferred until web client UI work picks up the corpus |
+| 7 | Help editor: `reviewed: true` flip workflow + Designer-side review gate | Same blocker as 1.4 — needs the editor tool first |
+| 2 | Skeleton generator + LLM fill + validation gate | Current corpus is hand-authored; tooling lands when content scales past manual editing. Original design proposed Python; user prefers C++ (e.g. `a help-registry dump CLI` + gtest validation) — no Python in repo |
+| - | Tests — no `test_help*.cpp` in the port (none in upstream either). Smoke is manual. | gtest fixtures pending; corpus-load unit test plus resolver fixtures would be ~150 lines |
+| - | Content quality — `global_functions.json` is skeleton-only (`reviewed: false`, empty description / parameters / return / example); `keywords.json` + `primitive_types.json` are populated and `reviewed: true`. **2026-06-11:** `queries.json` added (en/ru/uk, 14 reviewed entries each + the `query` category) — the full query-language reference: overview (how a query is written / executed), the `Query` / `QueryResult` / `QuerySelect` classes, and per-clause articles (SELECT/TOP/DISTINCT, FROM + virtual tables + subqueries, JOIN, WHERE, GROUP BY/HAVING, ORDER BY, TOTALS…BY, UNION/UNION ALL, &parameters, dot-walk incl. composite references), with the current executable-subset limits stated per clause | Phase 2 generator + LLM fill remains the cost driver; current state ships with usable keywords + types + the query reference, and stubs for functions |
+| - | `wxLogMessage` debug noise in `wxZipInputStream` parsing path (left for now to ease zip-format diagnosis); strip after smoke validation stabilises | Diagnostic value during current shake-out |
+
+### Files touched in this port
+
+37 files changed, +4682 / -5 vs `origin/develop`.
+
+- 11 new files in `src/engine/backend/syntaxHelper/` (9 upstream + 2 my `helpService.{h,cpp}`)
+- 14 new files in `src/engine/frontend/syntaxHelper/` (all upstream, includes adapted to `syntaxHelper/` namespace)
+- 15 JSON content files in `syntaxHelper/{en,ru,uk}/` (repo root, not under `src/`)
+- 1 design doc `docs/syntax-helper-design.md` (this file)
+- 1 `CMakePresets.json` (repo root, 8 build presets)
+- Build wiring: `backend.vcxproj` + `backend.vcxproj.filters` + `backend/CMakeLists.txt` (+`StageSyntaxHelperContent` Target with `[IO.Compression.ZipFile]`); `frontend.vcxproj` + `frontend.vcxproj.filters`
+- `appData.{h,cpp}` — forward decl + member + static getter + lazy init (compact, isolated)
+- `mainFrameDesigner.{h,cpp,Menu.cpp,Parts.cpp}` — help-only hunks (without AI / template / plugin code from upstream)
+- `mainFrame/mainFrame.h` — `wxAUI_PANE_HELP` + `wxID_FRONTEND_SYNTAX_HELPER` / `_LOOKUP` IDs
+- `codeEditor.{h,cpp}` — `GetIdentifierUnderCursor` + `OnContextMenu` + bindings (no debug shortcut routing — that lands separately)
+
+### Diff vs upstream `feature/syntax-helper` branch
+
+The upstream branch carries ~250 additional files for AI / MCP / pluginWebPane / templateWizard / various designer panels — explicitly out of scope for this port. This port also:
+
+- Renames the backend / frontend subsystem directory `help/ → syntaxHelper/` for naming consistency with the content root (was `data/help/` upstream → `syntaxHelper/` here)
+- Replaces `data/help/` content path with `syntaxHelper/` (repo root, alongside `docs/`, `locale/`)
+- Renames archive extension `.hbk → .hlk` (avoids overloading the 1С proprietary `.hbk` extension)
+- Pulls `ibHelpService` out of `ibApplicationData` (upstream had `GetHelpCorpus` / `ReloadHelpCorpus` directly on appData — port follows the `ibLogger`/`ibLockManager` subsystem pattern)
+- Drops the `bring-your-own-.hbk` external-platform integration path (was tied to the 1С ecosystem)
+- Strips Cyrillic UI strings from comments + design doc (code stays ASCII-only; user-facing labels stay in `_()` macros for i18n)
+
+---
 
 **Status:** Design v5. Four rounds of triple-review. v1 closed
 the original design holes (thread-safety, error model, pointer
@@ -7,15 +83,14 @@ misreferences). v2 added overlay rules, private cache directive,
 C++17-safe atomic_shared_ptr publish pattern, content-hash
 fingerprint, per-entry try/catch loader. v3 closed the v2 P0
 (session vs appData ownership), unified the ambiguous-name
-chooser as a single modal dialog matching 1C's "Вибір розділу"
-convention with three buttons (Показати / Відмінити / Довідка),
-pinned `Ctrl+F1` + "Пошук у Синтакс-Помічнику" context menu as
-the canonical trigger surfaces, locked the top-level category
-layout to the 1C/BAS set (Общее описание / Глобальный контекст /
-Интерфейс обычный + управляемый / Общие объекты / Прикладные
-объекты / Системные перечисления / Работа с запросами), and
+chooser as a single modal dialog with three buttons (Show /
+Cancel / Help), pinned `Ctrl+F1` + "Look up in Syntax Helper"
+context menu as the canonical trigger surfaces, locked the top-
+level category layout to a low-code-platform-conventional set
+(Language overview / Global context / Classic UI + Managed UI /
+Common objects / Applied objects / System enums / Queries), and
 added §9 "Reusable open-source components" with a license
-compatibility matrix + BYO-`.hbk` pattern. Target branch
+compatibility matrix. Target branch
 `feature/syntax-helper`. Replaces today's tooltip-only
 IntelliSense help (`s_listHelpDescription` short strings) with a
 categorized, searchable reference panel parallel to the editor.
@@ -23,14 +98,26 @@ categorized, searchable reference panel parallel to the editor.
 **Goal:** every identifier the script-author can type — keyword,
 built-in function, system enum, metadata class, attribute, method —
 has a one-click path to a structured description (signature, semantics,
-parameters, return value, availability tier, example) that mirrors the
-"Синтакс-помічник" panel from 1C:Enterprise / BAS, including the
-inline `...` button next to procedure parameters and the ambiguous-
-identifier chooser dialog.
+parameters, return value, availability tier, example) shown in a
+dockable sidebar, with an inline `...` button next to procedure
+parameters and an ambiguous-identifier chooser dialog.
 
 The pure data layer (help corpus + lookup) must work headless so the
 web frontend (wfrontend.dll) gets the same hover/click help as the
 desktop designer.
+
+## Table of contents
+
+1. [Current state](#1-current-state)
+2. [Help entry — data model](#2-help-entry--data-model)
+3. [Backend — help corpus subsystem](#3-backend--help-corpus-subsystem)
+4. [Help corpus generation pipeline](#4-help-corpus-generation-pipeline)
+5. [Frontend — Desktop sidebar pane](#5-frontend--desktop-sidebar-pane)
+6. [Frontend — Web (wfrontend.dll)](#6-frontend--web-wfrontenddll)
+7. [Phasing](#7-phasing)
+8. [Resolved decisions + remaining open questions](#8-resolved-decisions--remaining-open-questions)
+9. [Reusable open-source components](#9-reusable-open-source-components)
+10. [Non-goals (for this iteration)](#10-non-goals-for-this-iteration)
 
 ## 1. Current state
 
@@ -96,11 +183,11 @@ desktop designer.
 
 * Long-form descriptions (semantics, examples, availability tier).
 * Category tree — today there is no hierarchical organization of the
-  reference (1C uses Прикладные объекты / Общие объекты / Работа
-  с запросами / Системные перечисления / etc.).
+  reference (the proposed top-level groups are Applied objects /
+  Common objects / Queries / System enums / etc.).
 * UI shell — no sidebar pane in either Designer or the web client.
 * Inline `...` button on parameter lists in the editor.
-* Ambiguous-name chooser dialog (e.g. `Дата` resolves to a type, a
+* Ambiguous-name chooser dialog (e.g. `Date` resolves to a type, a
   Document property, a function, and a MomentTime attribute).
 * Full-text search across descriptions.
 
@@ -115,15 +202,15 @@ desktop designer.
 struct ibHelpEntry {
     wxString id;              // canonical key, see §2.2 — e.g. "fn.DateToStr"
     int      schemaVersion;   // loader-side; on-disk lives in bucket header
-    wxString nameLocal;       // localized identifier ("Дата")
-    wxString nameEn;          // English identifier ("Date") — stable join key
+    wxString nameLocal;       // localised identifier (e.g. "Date" in en)
+    wxString nameEn;          // English identifier — stable join key
     wxString signature;       // single-line call form
     wxString description;     // markdown subset → rendered to HTML at load
     wxString syntaxBlock;     // formatted declaration / call form
     wxString parameters;      // markdown table or `<dl>`-style key:value
     wxString returnDescr;     // return-value semantics
     wxString example;         // markdown code block(s)
-    wxString availability;    // tier list — "Толстый клиент, Веб-клиент, Сервер"
+    wxString availability;    // tier list — e.g. "Thick client, Web client, Server" (localised)
 
     enum Kind {
         kKeyword, kSystemFunction, kSystemConstant, kSystemEnum,
@@ -215,17 +302,17 @@ category. UTF-8, BOM tolerated (loader strips it). Bucket file shape:
   "entries": [
     {
       "id": "type.Date",
-      "name_local": "Дата",
+      "name_local": "Date",
       "name_en": "Date",
       "kind": "primitive_type",
       "category_keys": ["common_lang","primitive_types","date"],
-      "signature": "Дата(<Параметр>) / Дата(<Год>,<Месяц>,<День>)",
-      "description": "Значения данного типа содержат дату...",
-      "syntax_block": "Дата(<Параметр>)",
-      "parameters": "<Параметр> — выражение типа строка либо число...",
-      "return_descr": "Значение типа 'Дата'.",
-      "example": "Дата('20170323104525') = '23.03.2017 10:45:25'",
-      "availability": "Тонкий клиент, веб-клиент, мобильный клиент, сервер",
+      "signature": "Date(<value>) / Date(<year>, <month>, <day>)",
+      "description": "Values of this type hold a date with second precision...",
+      "syntax_block": "Date(<value>)",
+      "parameters": "<value> — string or numeric expression representing the date.",
+      "return_descr": "A value of type Date.",
+      "example": "Date('20170323104525') = '2017-03-23 10:45:25'",
+      "availability": "Thin client, web client, mobile client, server",
       "see_also": ["fn.DateToStr","fn.StrToDate"],
       "reviewed": true
     }
@@ -259,12 +346,12 @@ Sibling to the buckets: `data/help/<locale>/_categories.json`:
   "schema_version": 1,
   "locale": "ru-RU",
   "categories": {
-    "applied_objects": "Прикладные объекты",
-    "documents":       "Документы",
-    "properties":      "Свойства",
-    "common_lang":     "Общее описание встроенного языка",
-    "primitive_types": "Примитивные типы",
-    "date":            "Дата"
+    "applied_objects": "Applied objects",
+    "documents":       "Documents",
+    "properties":      "Properties",
+    "common_lang":     "Language overview",
+    "primitive_types": "Primitive types",
+    "date":            "Date"
   }
 }
 ```
@@ -477,7 +564,7 @@ Built once in the constructor; each `O(N)` where N ≤ ~2000 today:
 - `std::map<wxString, std::vector<EntryIndex>> m_prefixIndex` —
   `lower_bound` walk for prefix search. Value is a vector, not a
   single index, because multiple entries can share the same
-  normalized prefix key (e.g. four `Дата` entries: type / function /
+  normalized prefix key (e.g. four `Date` entries: type / function /
   Document attribute / MomentTime attribute). Ordered std::map is
   O(log N + k) and zero extra code vs a trie. Phase 1 ships this;
   trie deferred unless profiling shows it.
@@ -536,7 +623,7 @@ Hand-writing ~85 functions + ~200 metadata properties + 58 keywords
 pipeline:
 
 1. **Skeleton generator** — Python `tools/help-skeleton.py` consumes
-   a JSON dump exported by a new in-binary `classChecker --dump-help`
+   a JSON dump exported by a new in-binary `a help-registry dump CLI`
    subcommand. The dump tool walks `s_listKeyWord`,
    `ibValueSystemFunction::PrepareNames()`, and each
    `ibValueMetaObject*` subtype's `PrepareNames()`. JSON-via-CLI keeps
@@ -586,55 +673,59 @@ content (not just translated names) in all three.
 
 ### 4.2. Keyword name localization
 
-OES supports both English (`Procedure/EndProcedure/If/Then`) and
-Ukrainian/Russian keyword aliases (planned via the same translate
-layer that gpl-2C used: `Процедура/КонецПроцедуры/Якщо/Тоді`). Each
-keyword `ibHelpEntry` therefore carries `name_local` matching the
-locale alias, plus `name_en` as the stable cross-locale join key.
+OES supports English keywords (`Procedure / EndProcedure / If / Then`)
+plus planned per-locale aliases via the translate layer. Each keyword
+`ibHelpEntry` therefore carries `name_local` matching the locale alias
+and `name_en` as the stable cross-locale join key.
 `s_listKeyWord` ordering is load-bearing — `KEY_FROM..KEY_INTO`
 block must not be reshuffled by anything in this pipeline (read-only
 walk over the existing array, no append-in-middle).
 
 ## 5. Frontend — Desktop sidebar pane
 
-New module: `src/engine/frontend/help/`.
+New module: `src/engine/frontend/syntaxHelper/`.
 
 ```
-help/
+syntaxHelper/
 ├── helpPaneView.h/.cpp     // wxAui pane container, splitter, 3 tabs
-├── helpTreeView.cpp        // Зміст — wxTreeCtrl, hierarchical categories
-├── helpIndexView.cpp       // Індекс — filter textbox + filtered wxListBox
-├── helpSearchView.cpp      // Пошук — full-text wxSearchCtrl + result list
+├── helpTreeView.cpp        // Tree tab — wxTreeCtrl, hierarchical categories
+├── helpIndexView.cpp       // Index tab — filter textbox + filtered wxListBox
+├── helpSearchView.cpp      // Search tab — full-text wxSearchCtrl + result list
 ├── helpDetailView.cpp      // bottom — wxHtmlWindow + toolbar
-└── helpChooserDialog.cpp   // modal "Вибір розділу" dialog (§5.3)
+└── helpChooserDialog.cpp   // modal "Choose section" dialog (§5.3)
 ```
 
-### 5.0. Top-level category layout (mirrors 1C/BAS)
+### 5.0. Top-level category layout
 
-The tree's top-level nodes match 1C / BAS Configurator conventions
-so users moving across platforms recognize the structure. Stored as
-`category_keys` (stable English ids — §2.2 / §2.4) with localized
-display via `_categories.json`:
+The tree's top-level nodes follow a conventional low-code-platform
+structure (Language overview / Global context / UI / Common
+objects / Applied objects / System enums / Queries) so users
+moving from similar tools recognise the layout. Stored as stable
+English `category_keys` (§2.2 / §2.4) with per-locale display
+names resolved via `_categories.json` (each locale dictionary
+maps the English key to its localised label — see the per-locale
+JSON files under `syntaxHelper/`):
 
-| `category_key`         | ru-RU display              | uk-UA display              |
-|------------------------|----------------------------|----------------------------|
-| `common_lang`          | Общее описание встроенного языка | Загальний опис вбудованої мови |
-| `global_context`       | Глобальный контекст         | Глобальний контекст         |
-| `ui_regular`           | Интерфейс (обычный)         | Інтерфейс (звичайний)       |
-| `ui_managed`           | Интерфейс (управляемый)     | Інтерфейс (керований)       |
-| `common_objects`       | Общие объекты               | Загальні об'єкти            |
-| `applied_objects`      | Прикладные объекты          | Прикладні об'єкти           |
-| `system_value_sets`    | Системные наборы значений   | Системні набори значень     |
-| `system_enums`         | Системные перечисления      | Системні перерахування      |
-| `queries`              | Работа с запросами          | Робота із запитами          |
+| `category_key`         | English display              |
+|------------------------|------------------------------|
+| `common_lang`          | Language overview            |
+| `global_context`       | Global context               |
+| `ui_regular`           | Classic UI                   |
+| `ui_managed`           | Managed UI                   |
+| `common_objects`       | Common objects               |
+| `applied_objects`      | Applied objects              |
+| `system_value_sets`    | System value sets            |
+| `system_enums`         | System enums                 |
+| `queries`              | Queries                      |
 
 Sub-trees branch from these — e.g. `applied_objects/documents/<DocName>/properties/<PropName>`.
 
 ### Designer integration
 
 `ibDesignerMainFrame` already owns the AUI manager that hosts the
-metaTree on the left and the docView/editor on the centre. Add a third
-docked pane on the right named "Синтакс-помічник" / "Syntax helper":
+metaTree on the left and the docView/editor on the centre. Add a
+third docked pane on the right with the user-visible caption
+"Syntax helper" (localised per the active locale):
 
 ```cpp
 m_auiManager.AddPane(
@@ -658,8 +749,9 @@ existing AUI perspective string saved to the user-config file.
 `wxHtmlWindow` accepts a subset of HTML. The corpus renderer transforms
 each `ibHelpEntry` into a small HTML doc with:
 
-* `<h2>` name (ru + en parenthesized, matching 1C convention)
-* `<b>` Описание / Синтаксис / Параметры / Пример / Доступность
+* `<h2>` name (local + English in parentheses) for cross-locale clarity
+* `<b>` section labels — Description / Syntax / Parameters / Example /
+  Availability (localised at render time)
 * `<code>` blocks for signatures and examples
 * Links to `see_also` ids — clicking re-targets the pane to that entry
 
@@ -682,44 +774,46 @@ existing autocomplete window — both already integrate with
 ### Ambiguous-name chooser dialog
 
 `ibHelpChooserDialog` — single modal `wxDialog` used for ALL chooser
-triggers (editor, tree, web round-trip). Matches the 1C / BAS
-"Вибір розділу" convention so users moving between platforms see the
-same interaction.
+triggers (editor, tree, web round-trip). Standard "Choose section"
+flow so users moving from other low-code platforms see a familiar
+interaction.
+
+Layout (labels shown here in English; UI strings are localised
+via `_()` so each locale gets its own translation):
 
 ```
 +-----------------------------------------------+
-| Вибір розділу                            [×]  |
+| Choose section                           [×]  |
 |-----------------------------------------------|
-| Виберіть розділ зі списку:                    |
+| Select a section from the list:               |
 | ┌───────────────────────────────────────────┐ |
-| │ Общее описание встр. языка/Прим.типы/Дата │ |
-| │ Прикладные объекты/Документы/.../Дата     │ |
-| │ Прикладные объекты/Журналы.../...         │ |
-| │ Универсальные объекты/МоментВремени/Дата  │ |
+| │ Language overview / Primitive types / Date │|
+| │ Applied objects / Documents / ... / Date  │ |
+| │ Applied objects / Journals / ...          │ |
+| │ Universal objects / MomentTime / Date     │ |
 | │ ...                                       │ |
 | └───────────────────────────────────────────┘ |
-|             [Показати] [Відмінити] [Довідка]  |
+|                       [Show] [Cancel] [Help]  |
 +-----------------------------------------------+
 ```
 
-Buttons:
-- **Показати / Показать / Show** — opens the syntax-helper pane on
-  the selected entry. Default action (Enter).
-- **Відмінити / Отменить / Cancel** — closes without touching the
-  pane state. Esc.
-- **Довідка / Справка / Help** — opens the helper pane on the
-  "About the syntax helper" entry, not on the selected list item.
+Buttons (UI strings localised, English shown as default):
+- **Show** — opens the syntax-helper pane on the selected entry.
+  Default action (Enter).
+- **Cancel** — closes without touching the pane state. Esc.
+- **Help** — opens the helper pane on the "About the syntax helper"
+  guide entry, not on the selected list item.
 
 The dialog is **always modal** — no popup-at-caret variant. The
 editor temporarily loses focus to the dialog; the dialog returns
 focus to the same editor position on dismiss (Cancel / Show /
-Esc). This is intentional: matches 1C muscle memory and avoids
-the focus-juggling complexity of a non-modal popup over Scintilla.
+Esc). This avoids the focus-juggling complexity of a non-modal
+popup over Scintilla.
 
 Trigger paths converge on the same dialog:
 - Ctrl+F1 in editor → resolver → 1 match opens pane; >1 matches
   show dialog
-- Right-click → "Пошук у Синтакс-Помічнику" → same resolver path
+- Right-click → "Look up in Syntax Helper" → same resolver path
 - Ctrl+F1 in metadata tree → resolver on node name → same dialog
 - Web client: resolve endpoint returns N matches; React shell
   renders an equivalent overlay (same JSON, web-native chrome —
@@ -812,7 +906,7 @@ Ship in independently-mergeable slices. Dependency chain explicit:
    Procedure, three keywords). **Precondition for all other phases.**
 
 2. **Phase 2 — Skeleton generator + validation gate.** Python
-   tooling. `classChecker --dump-help` subcommand emits the registry
+   tooling. `a help-registry dump CLI` subcommand emits the registry
    JSON. `tools/help-skeleton.py` builds bucket skeletons.
    `tools/help-validate.py` runs in CI on every PR touching `data/help/`.
    Validation gate ships BEFORE LLM-filled content so no
@@ -824,8 +918,8 @@ Ship in independently-mergeable slices. Dependency chain explicit:
    right side; View-menu toggle; persisted in AUI perspective. Empty
    state, load-failure state. `Ctrl+F1` (open syntax helper at the
    identifier under cursor) wired as a global accelerator in the
-   designer mainframe; right-click → "Пошук у Синтакс-Помічнику /
-   Поиск в Синтаксис-Помощнике" context menu item; pane-open from
+   designer mainframe; right-click → "Look up in Syntax Helper"
+   context menu item (label localised per active locale); pane-open from
    View menu / toolbar. Detachable detail pane (`.Float()` allowed)
    for long examples. First LLM-filled corpus pass lands here
    covering all 85 system functions + 58 keywords + primitive types
@@ -836,8 +930,8 @@ Ship in independently-mergeable slices. Dependency chain explicit:
    (`DEF_HELP_HINT_ID=3`) for `...` next to call expressions;
    click delegates to the same `Ctrl+F1` resolver path so all
    trigger surfaces converge on one code path. Ambiguous-name
-   resolution opens `ibHelpChooserDialog` (modal, §5.3) — matches
-   the 1C "Вибір розділу" convention. Navigation history (← →) in
+   resolution opens `ibHelpChooserDialog` (modal, §5.3) —
+   standard "Choose section" flow. Navigation history (← →) in
    the help pane via `Alt+←` / `Alt+→`. Tooltips swap from
    `s_listHelpDescription` short strings to corpus entries.
    **Depends on Phase 3.**
@@ -944,32 +1038,19 @@ prerequisites above.
 
 ## 9. Reusable open-source components
 
-> **⚠ Legal-review TODO before Phase 2 starts pulling content.**
-> Triple-review v4 surfaced legal-precision gaps in this section
-> that need external verification before any third-party text or
-> data lands in `data/help/`:
-> 1. Confirm gpl-2C's exact license version (GPL-2 vs GPL-3) via
->    direct `LICENSE` fetch from the project tarball, not the web
->    page; pin commit SHA.
-> 2. Fetch `bsl-language-server`'s `LICENSE` file directly via `gh`
->    or repo clone and confirm assumed LGPL-3 — could be Apache.
->    Same for `mdclasses`, `sonar-bsl-plugin-community`.
-> 3. Confirm OES's own license variant — `COPYING` says
+> **⚠ Legal-review TODO before Phase 2 starts pulling third-party
+> content into `syntaxHelper/`:**
+> 1. Confirm OES's own license variant — `COPYING` says
 >    "LGPL 2.1 only" or "LGPL 2.1 or later"? This decides whether
 >    LGPL-3 sources can be consumed (the latter allows forward
 >    re-licensing).
-> 4. MPL 2.0 derivative-work obligations on extracted comments:
+> 2. MPL 2.0 derivative-work obligations on extracted comments:
 >    confirm whether comment-extraction creates a covered work
 >    (file-level copyleft applies) or a separate work (does not).
->    Affects whether `data/help/<locale>/*.json` derived from
->    OneScript / oscript-library prose must itself be MPL.
-> 5. CC-BY 4.0 NOTICE requirements for any ssl_3_* reuse —
->    spec-prominent placement and same-or-better visibility rules.
-> 6. EU sui-generis database right caveat — facts/structure of
+> 3. EU sui-generis database right caveat — facts / structure of
 >    a database can be protected in EU jurisdictions even without
 >    expression copyright.
 >
-> Until points 1-3 are answered, the matrix below is **provisional**.
 > Phase 1 (data layer code) does NOT depend on §9 — it can ship in
 > parallel with the legal audit.
 
@@ -1000,72 +1081,16 @@ Facts and structural decisions are not copyrightable; **expression**
 (actual prose) is. Safe pattern: study OSS sources for structure +
 write fresh prose.
 
-### 9.2. Surveyed sources
+### 9.2. Locale coverage map
 
-✅ = compatible reuse path exists. ⚠️ = restricted to reference /
-non-bundled use. ❌ = unusable for OES.
+| Locale  | Source strategy                                              |
+|---------|--------------------------------------------------------------|
+| en-US   | Primary authoring locale — native English prose              |
+| ru-RU   | Manual translation + LLM-assisted from en-US; native review  |
+| uk-UA   | Same as ru-RU; native review                                 |
 
-| Source | License | Reuse path |
-|---|---|---|
-| ✅ [`1c-syntax/vsc-language-1c-bsl`](https://github.com/1c-syntax/vsc-language-1c-bsl) | MIT | Bootstrap: keyword list, builtin-function names, base categorization from `syntaxes/1c.tmLanguage.json`. JSON → adapt to `ibHelpEntry` skeletons via `tools/help-skeleton.py`. Attribution in NOTICE. |
-| ✅ [`1c-syntax/bsl-help-toc-parser`](https://github.com/1c-syntax/bsl-help-toc-parser) | MIT | Java parser for 1C's proprietary `.hbk` syntax-helper file. Port the parsing approach to Python (or call the JAR from `tools/help-skeleton.py`) for users who own a 1C license and bring their own `.hbk`. **We never redistribute `.hbk` content.** |
-| ✅ [`Antonio1C/1c-syntax-helper-mcp`](https://github.com/Antonio1C/1c-syntax-helper-mcp) | MIT | Architectural reference for the bring-your-own-`.hbk` pattern. Their `src/parsers/` shows how to extract structured content from `.hbk`. |
-| ✅ [`EvilBeaver/OneScript`](https://github.com/EvilBeaver/OneScript) | MPL 2.0 (file-level) | `oscript-library` packages have XML-doc-style comments on built-in methods. Extract descriptions for OneScript-compatible builtins via `tools/help-skeleton.py`. **Do not modify their source files** — file-level copyleft only triggers on modified files. Attribution required. |
-| ✅ [`oscript-library`](https://github.com/oscript-library) | MPL 2.0 | Same as above — package source comments. |
-| ⚠️ [`1c-syntax/ssl_3_2`](https://github.com/1c-syntax/ssl_3_2) / `ssl_3_1` | CC-BY-4.0 | 1С standard subsystems — useful for documenting subsystem-level patterns. Attribution required; cannot be relicensed but can be referenced from OES docs. |
-| ⚠️ [`gpl-2C` project](https://www.gpl2c.ru/) | GPL-2 (code AND docs) | The docs at `gpl2c.ru/docs/level0.htm` describe the same core language constructs OES implements (Процедура / Якщо / Цикл / Try / preprocessor directives). **Reference only** — read for structure and example shapes; write our own prose. Verbatim copy would force OES help-corpus → GPL-2 which conflicts with the rest of OES's LGPL 2.1 distribution model. Facts are not copyrightable; expression is — paraphrase, do not lift. |
-| ❌ [`1c-syntax/bsl-parser`](https://github.com/1c-syntax/bsl-parser) | GPL-3 | Cannot use — viral. |
-| ❌ [`1c-syntax/bsl-context`](https://github.com/1c-syntax/bsl-context) | LGPL-3 | Version mismatch with OES's LGPL 2.1 — avoid. |
-| ❌ [`1c-syntax/bsl-language-server`](https://github.com/1c-syntax/bsl-language-server) | LGPL-3 (assumed pending direct LICENSE check) | Same. |
-| ❌ [`1c-syntax/sonar-bsl-plugin-community`](https://github.com/1c-syntax/sonar-bsl-plugin-community), `mdclasses` | LGPL-3 | Same. |
-| ❌ Bundling 1С `.hbk` files | Proprietary | Cannot redistribute 1С's prose. BYO-hbk pattern only (§9.3). |
-
-### 9.3. Bring-your-own-`.hbk` pattern (optional path)
-
-Antonio1C's MCP server and `bsl-help-toc-parser` both document a
-clean legal pattern: the parser code is OSS, but the **content
-file** (`.hbk`) must come from the user's own 1С installation. The
-parser produces structured output that the user can use locally; no
-1С-copyrighted text is ever in the OSS distribution.
-
-OES adopts the same pattern as a **Phase 5 optional path**: if the
-user's environment has a `.hbk` available (configurable path), the
-corpus builder can extract platform-specific descriptions and merge
-them into the per-config corpus tier (§3.6). The platform corpus
-itself **never** ships `.hbk`-derived content. This gives 1C-licensed
-users richer help without putting OES in legal jeopardy.
-
-### 9.4. Locale coverage map
-
-| Locale  | Native sources                | Translation source            |
-|---------|-------------------------------|-------------------------------|
-| ru-RU   | `vsc-language-1c-bsl` (RU descriptions), `oscript-library` (RU XML-doc), reference reading of gpl-2C docs | Native — primary authoring locale |
-| uk-UA   | Limited native — most BAS-localized 1C content is also in UA | Manual translation + LLM-assisted; verify against [Transifex bsl-language-server](https://www.transifex.com/1c-syntax/bsl-language-server/) for terminology consistency |
-| en-US   | wxWidgets / Scintilla developer audience already English | LLM translation from ru-RU source + manual review; standard CS terminology |
-
-Phase 7 review gate (§7) applies per locale — `reviewed: true` lands
-only after a native speaker passes the entry.
-
-### 9.5. NOTICE file additions
-
-When Phase 1 ships, append to OES's root `NOTICE` (or create one):
-
-```
-This product includes data adapted from:
-  - 1c-syntax/vsc-language-1c-bsl (MIT) —
-    https://github.com/1c-syntax/vsc-language-1c-bsl
-  - EvilBeaver/OneScript (MPL 2.0) —
-    https://github.com/EvilBeaver/OneScript
-  - oscript-library (MPL 2.0) —
-    https://github.com/oscript-library
-```
-
-If the BYO-`.hbk` path lands (Phase 5), additionally:
-
-```
-  - 1c-syntax/bsl-help-toc-parser (MIT) —
-    https://github.com/1c-syntax/bsl-help-toc-parser
-```
+Phase 7 review gate (§7) applies per locale — `reviewed: true`
+lands only after a native speaker passes the entry.
 
 ## 10. Non-goals (for this iteration)
 

@@ -1,7 +1,5 @@
 #include "connectionDB.h"
 
-#include <wx/filename.h>
-#include <wx/textdlg.h>
 #include <wx/xml/xml.h>
 
 void ibDialogConnection::InitConnection(
@@ -17,7 +15,7 @@ void ibDialogConnection::InitConnection(
 	if (bFileMode) {
 		m_radioFile->SetValue(true);
 		m_radioServer->SetValue(false);
-		m_textCtrlFilePath->SetValue(strFilePath);
+		m_dirPickerFile->SetPath(strFilePath);
 	}
 	else {
 		m_radioFile->SetValue(false);
@@ -81,10 +79,8 @@ ibDialogConnection::ibDialogConnection(wxWindow* parent, wxWindowID id, const wx
 	m_staticTextFilePath = new wxStaticText(this, wxID_ANY, _("Database folder:"), wxDefaultPosition, wxDefaultSize, 0);
 	m_staticTextFilePath->Wrap(-1);
 	sizerFilePath->Add(m_staticTextFilePath, 1, wxALIGN_CENTER_VERTICAL, 0);
-	m_textCtrlFilePath = new wxTextCtrl(this, wxID_ANY, wxEmptyString, wxDefaultPosition, wxDefaultSize, 0);
-	sizerFilePath->Add(m_textCtrlFilePath, 3, wxALL | wxEXPAND, FromDIP(5));
-	m_buttonBrowseFile = new wxButton(this, wxID_ANY, _("Browse"), wxDefaultPosition, wxDefaultSize, 0);
-	sizerFilePath->Add(m_buttonBrowseFile, 0, wxALL | wxALIGN_CENTER_VERTICAL, FromDIP(5));
+	m_dirPickerFile = new wxDirPickerCtrl(this, wxID_ANY, wxEmptyString, _("Select database folder"), wxDefaultPosition, wxDefaultSize, wxDIRP_USE_TEXTCTRL | wxDIRP_DIR_MUST_EXIST);
+	sizerFilePath->Add(m_dirPickerFile, 3, wxALL | wxEXPAND, FromDIP(5));
 	m_sizerFileMode->Add(sizerFilePath, 0, wxEXPAND, FromDIP(5));
 	mainSizer->Add(m_sizerFileMode, 0, wxEXPAND, FromDIP(5));
 
@@ -153,12 +149,6 @@ ibDialogConnection::ibDialogConnection(wxWindow* parent, wxWindowID id, const wx
 	this->Centre(wxBOTH);
 
 	// Connect Events
-	m_buttonBrowseFile->Bind(wxEVT_BUTTON,
-	                         &ibDialogConnection::BrowseFileOnButtonClick,
-	                         this);
-	m_buttonBrowseFile->Bind(wxEVT_LEFT_UP,
-	                         &ibDialogConnection::BrowseFileOnMouseUp,
-	                         this);
 	m_buttonTestConnection->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(ibDialogConnection::TestConnectionOnButtonClick), NULL, this);
 	m_buttonSaveConnection->Connect(wxEVT_COMMAND_BUTTON_CLICKED, wxCommandEventHandler(ibDialogConnection::SaveConnectionOnButtonClick), NULL, this);
 }
@@ -167,86 +157,6 @@ void ibDialogConnection::OnModeChanged(wxCommandEvent& event)
 {
 	UpdateModeVisibility();
 	event.Skip();
-}
-
-void ibDialogConnection::BrowseFile()
-{
-	wxString initialPath = m_textCtrlFilePath->GetValue();
-	if (initialPath.IsEmpty()) {
-		initialPath = wxStandardPaths::Get().GetDocumentsDir();
-	}
-
-	wxDialog dlg(this, wxID_ANY, _("Select database folder"), wxDefaultPosition,
-	             wxSize(560, 420), wxDEFAULT_DIALOG_STYLE | wxRESIZE_BORDER);
-	wxBoxSizer* mainSizer = new wxBoxSizer(wxVERTICAL);
-	wxGenericDirCtrl* dirCtrl = new wxGenericDirCtrl(
-		&dlg, wxID_ANY, initialPath, wxDefaultPosition, wxDefaultSize,
-		wxDIRCTRL_DIR_ONLY | wxDIRCTRL_SELECT_FIRST);
-	mainSizer->Add(dirCtrl, 1, wxALL | wxEXPAND, FromDIP(8));
-
-	wxBoxSizer* actionsSizer = new wxBoxSizer(wxHORIZONTAL);
-	wxButton* newFolderButton = new wxButton(&dlg, wxID_ANY, _("New folder"));
-	actionsSizer->Add(newFolderButton, 0, wxRIGHT, FromDIP(8));
-	actionsSizer->AddStretchSpacer(1);
-
-	wxStdDialogButtonSizer* buttonSizer = new wxStdDialogButtonSizer();
-	buttonSizer->AddButton(new wxButton(&dlg, wxID_OK));
-	buttonSizer->AddButton(new wxButton(&dlg, wxID_CANCEL));
-	buttonSizer->Realize();
-	actionsSizer->Add(buttonSizer, 0);
-	mainSizer->Add(actionsSizer, 0, wxALL | wxEXPAND, FromDIP(8));
-
-	newFolderButton->Bind(wxEVT_BUTTON, [dirCtrl, &dlg](wxCommandEvent&) {
-		wxString parentPath = dirCtrl->GetPath();
-		if (parentPath.IsEmpty()) {
-			parentPath = wxStandardPaths::Get().GetDocumentsDir();
-		}
-
-		wxTextEntryDialog nameDialog(&dlg, _("Folder name:"), _("New folder"));
-		if (nameDialog.ShowModal() != wxID_OK)
-			return;
-
-		wxString folderName = nameDialog.GetValue().Trim(true).Trim(false);
-		if (folderName.IsEmpty())
-			return;
-
-		if (folderName.Find(wxFileName::GetPathSeparator()) != wxNOT_FOUND) {
-			wxMessageBox(_("Folder name must not contain path separators."),
-				_("New folder"), wxOK | wxICON_WARNING, &dlg);
-			return;
-		}
-
-		wxFileName newFolder(parentPath, wxEmptyString);
-		newFolder.AppendDir(folderName);
-		const wxString newPath = newFolder.GetPath();
-
-		if (!wxFileName::Mkdir(newPath, wxS_DIR_DEFAULT, wxPATH_MKDIR_FULL)) {
-			wxMessageBox(_("Failed to create folder."),
-				_("New folder"), wxOK | wxICON_ERROR, &dlg);
-			return;
-		}
-
-		dirCtrl->ReCreateTree();
-		dirCtrl->SetPath(newPath);
-	});
-
-	dlg.SetSizer(mainSizer);
-	dlg.Layout();
-	dlg.CentreOnParent();
-
-	if (dlg.ShowModal() == wxID_OK) {
-		m_textCtrlFilePath->SetValue(dirCtrl->GetPath());
-	}
-}
-
-void ibDialogConnection::BrowseFileOnButtonClick(wxCommandEvent& event)
-{
-	BrowseFile();
-}
-
-void ibDialogConnection::BrowseFileOnMouseUp(wxMouseEvent& event)
-{
-	BrowseFile();
 }
 
 #ifdef OES_USE_POSTGRESQL

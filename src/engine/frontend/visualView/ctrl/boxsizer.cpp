@@ -24,7 +24,7 @@ wxObject* ibValueBoxSizer::Create(ibFrontendWindow* /*parent*/, ibVisualHost* /*
 #endif
 }
 
-void ibValueBoxSizer::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost *visualHost, bool firstCreated)
+void ibValueBoxSizer::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost *visualHost, bool firstСreated)
 {
 }
 

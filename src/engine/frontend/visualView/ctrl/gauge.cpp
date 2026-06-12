@@ -21,7 +21,7 @@ wxObject* ibValueGauge::Create(wxWindow* wxparent, ibVisualHost* visualHost)
 	);
 }
 
-void ibValueGauge::OnCreated(wxObject* wxobject, wxWindow* wxparent, ibVisualHost* visualHost, bool firstCreated)
+void ibValueGauge::OnCreated(wxObject* wxobject, wxWindow* wxparent, ibVisualHost* visualHost, bool firstСreated)
 {
 }
 

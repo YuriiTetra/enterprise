@@ -23,7 +23,7 @@ wxObject* ibValueTextBox::Create(wxWindow* wxparent, ibVisualHost* visualHost)
 	return textWindow;
 }
 
-void ibValueTextBox::OnCreated(wxObject* wxobject, wxWindow* wxparent, ibVisualHost* visualHost, bool firstCreated)
+void ibValueTextBox::OnCreated(wxObject* wxobject, wxWindow* wxparent, ibVisualHost* visualHost, bool firstСreated)
 {
 	ibTextEditor* textWindow = dynamic_cast<ibTextEditor*>(wxobject);
 }

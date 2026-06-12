@@ -21,21 +21,27 @@
   <ItemGroup>
     <ClInclude Include="actionInfo.h" />
     <ClInclude Include="appData.h" />
-    <ClInclude Include="help\helpCategory.h" />
-    <ClInclude Include="help\helpCorpus.h" />
-    <ClInclude Include="help\helpEntry.h" />
-    <ClInclude Include="help\helpLoadError.h" />
-    <ClInclude Include="help\helpLoader.h" />
-    <ClInclude Include="help\helpResolver.h" />
-    <ClInclude Include="io\ioReader.h" />
-    <ClInclude Include="io\ioWriter.h" />
-    <ClInclude Include="io\jsonReader.h" />
-    <ClInclude Include="io\jsonWriter.h" />
-    <ClInclude Include="io\xmlReader.h" />
-    <ClInclude Include="io\xmlWriter.h" />
+    <ClInclude Include="appDataCtorToken.h" />
+    <ClInclude Include="appEnv.h" />
     <ClInclude Include="backend.h" />
+    <ClInclude Include="syntaxHelper\helpCategory.h" />
+    <ClInclude Include="syntaxHelper\helpCorpus.h" />
+    <ClInclude Include="syntaxHelper\helpEntry.h" />
+    <ClInclude Include="syntaxHelper\helpLoader.h" />
+    <ClInclude Include="syntaxHelper\helpLoadError.h" />
+    <ClInclude Include="syntaxHelper\helpResolver.h" />
+    <ClInclude Include="syntaxHelper\helpService.h" />
+    <ClInclude Include="logger\logger.h" />
+    <ClInclude Include="logger\loggerEntry.h" />
+    <ClInclude Include="logger\loggerQueue.h" />
+    <ClInclude Include="logger\loggerReader.h" />
+    <ClInclude Include="logger\loggerSink.h" />
+    <ClInclude Include="logger\loggerSinkSqlite.h" />
+    <ClInclude Include="logger\loggerSweep.h" />
+    <ClInclude Include="logger\loggerWriter.h" />
     <ClInclude Include="backend_spreadsheet.h" />
     <ClInclude Include="backend_exception.h" />
+    <ClInclude Include="diagnostics\crashGuard.h" />
     <ClInclude Include="session\designerExclusivePolicy.h" />
     <ClInclude Include="session\session.h" />
     <ClInclude Include="session\sessionPolicy.h" />
@@ -43,6 +49,11 @@
     <ClInclude Include="session\sessionSnapshot.h" />
     <ClInclude Include="session\workerPool.h" />
     <ClInclude Include="session\workerPoolHeadless.h" />
+    <ClInclude Include="lock\lockTypes.h" />
+    <ClInclude Include="lock\lockHandle.h" />
+    <ClInclude Include="lock\lockHolder.h" />
+    <ClInclude Include="lock\lockKeyHash.h" />
+    <ClInclude Include="lock\lockManager.h" />
     <ClInclude Include="backend_core.h" />
     <ClInclude Include="backend_mainFrame.h" />
     <ClInclude Include="backend_picture.h" />
@@ -72,6 +83,7 @@
     <ClInclude Include="databaseLayer\databaseErrorReporter.h" />
     <ClInclude Include="databaseLayer\connectionPool.h" />
     <ClInclude Include="databaseLayer\connectionScope.h" />
+    <ClInclude Include="databaseLayer\databaseQueryBuilder.h" />
     <ClInclude Include="databaseLayer\databaseLayer.h" />
     <ClInclude Include="databaseLayer\databaseLayerDef.h" />
     <ClInclude Include="databaseLayer\databaseLayerException.h" />
@@ -88,8 +100,18 @@
     <ClInclude Include="databaseLayer\firebird\engine\ibase.h" />
     <ClInclude Include="databaseLayer\firebird\engine\iberror.h" />
     <ClInclude Include="databaseLayer\firebird\engine\ib_util.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdBlobCompression.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdBootstrap.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdCommon.h" />
     <ClInclude Include="databaseLayer\firebird\firebirdDatabaseLayer.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdHlc.h" />
     <ClInclude Include="databaseLayer\firebird\firebirdInterface.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdLeaderMode.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdLease.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdLocalServer.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdMaintenance.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdMaintenanceScheduler.h" />
+    <ClInclude Include="databaseLayer\firebird\firebirdReplicationConfig.h" />
     <ClInclude Include="databaseLayer\firebird\firebirdParameter.h" />
     <ClInclude Include="databaseLayer\firebird\firebirdParameterCollection.h" />
     <ClInclude Include="databaseLayer\firebird\firebirdPreparedStatement.h" />
@@ -155,6 +177,7 @@
     <ClInclude Include="metaCollection\metaFormObject.h" />
     <ClInclude Include="metaCollection\metaSpreadsheetObject.h" />
     <ClInclude Include="metaCollection\metaModuleObject.h" />
+    <ClInclude Include="metaCollection\metaDiff.h" />
     <ClInclude Include="metaCollection\metaObject.h" />
     <ClInclude Include="metaCollection\metaObjectMetadata.h" />
     <ClInclude Include="metaCollection\metaObjectMetadataEnum.h" />
@@ -187,8 +210,23 @@
     <ClInclude Include="metaCollection\partial\informationRegister.h" />
     <ClInclude Include="metaCollection\partial\informationRegisterEnum.h" />
     <ClInclude Include="metaCollection\partial\informationRegisterManager.h" />
-    <ClInclude Include="metaCollection\partial\list\listSqlBuilder.h" />
-    <ClInclude Include="metaCollection\partial\list\registerSqlBuilder.h" />
+    <ClInclude Include="query\queryable.h" />
+    <ClInclude Include="query\dataQueryBuilder.h" />
+    <ClInclude Include="query\queryProvider.h" />
+    <ClInclude Include="query\dbTableProvider.h" />
+    <ClInclude Include="query\tempTableManager.h" />
+    <ClInclude Include="query\queryRamTable.h" />
+    <ClInclude Include="query\queryKeywords.h" />
+    <ClInclude Include="query\queryLexer.h" />
+    <ClInclude Include="query\queryAst.h" />
+    <ClInclude Include="query\queryParser.h" />
+    <ClInclude Include="query\queryLowering.h" />
+    <ClInclude Include="query\queryRewrite.h" />
+    <ClInclude Include="compiler\lambdaQueryAst.h" />
+    <ClInclude Include="query\queryableFactory.h" />
+    <ClInclude Include="query\queryableHooks.h" />
+    <ClInclude Include="system\value\valueQuery.h" />
+    <ClInclude Include="system\value\valueQueryable.h" />
     <ClInclude Include="metaCollection\partial\list\objectList.h" />
     <ClInclude Include="metaCollection\partial\commonObject.h" />
     <ClInclude Include="metaCollection\partial\reference\reference.h" />
@@ -205,7 +243,8 @@
     <ClInclude Include="moduleInfo.h" />
     <ClInclude Include="moduleManager\moduleManager.h" />
     <ClInclude Include="moduleManager\moduleManagerExt.h" />
-    <ClInclude Include="number.h" />
+    <ClInclude Include="fnumber.h" />
+    <ClInclude Include="fstring.h" />
     <ClInclude Include="objCtor.h" />
     <ClInclude Include="picturePredefined.h" />
     <ClInclude Include="propertyManager\propertyManager.h" />
@@ -275,10 +314,10 @@
     <ClInclude Include="uniqueKey.h" />
     <ClInclude Include="plugin\pluginApi.h" />
     <ClInclude Include="plugin\pluginManager.h" />
-    <ClInclude Include="plugin\pluginValue.h" />
     <ClInclude Include="utils\md5.hpp" />
     <ClInclude Include="utils\sha256.hpp" />
     <ClInclude Include="utils\passwordHash.hpp" />
+    <ClInclude Include="utils\dataVersion.hpp" />
     <ClInclude Include="valueInfo.h" />
     <ClInclude Include="value_cast.h" />
     <ClInclude Include="value_ptr.h" />
@@ -286,22 +325,31 @@
   <ItemGroup>
     <ClCompile Include="appData.cpp" />
     <ClCompile Include="appDataQuery.cpp" />
-    <ClCompile Include="help\helpCorpus.cpp" />
-    <ClCompile Include="help\helpLoader.cpp" />
-    <ClCompile Include="help\helpResolver.cpp" />
-    <ClCompile Include="io\jsonReader.cpp" />
-    <ClCompile Include="io\jsonWriter.cpp" />
-    <ClCompile Include="io\xmlReader.cpp" />
-    <ClCompile Include="io\xmlWriter.cpp" />
+    <ClCompile Include="appEnv.cpp" />
+    <ClCompile Include="syntaxHelper\helpCorpus.cpp" />
+    <ClCompile Include="syntaxHelper\helpLoader.cpp" />
+    <ClCompile Include="syntaxHelper\helpResolver.cpp" />
+    <ClCompile Include="syntaxHelper\helpService.cpp" />
+    <ClCompile Include="logger\logger.cpp" />
+    <ClCompile Include="logger\loggerQueue.cpp" />
+    <ClCompile Include="logger\loggerReader.cpp" />
+    <ClCompile Include="logger\loggerSinkSqlite.cpp" />
+    <ClCompile Include="logger\loggerSweep.cpp" />
+    <ClCompile Include="logger\loggerWriter.cpp" />
     <ClCompile Include="userInfo.cpp" />
     <ClCompile Include="backend.cpp" />
     <ClCompile Include="backend_spreadsheet.cpp" />
     <ClCompile Include="backend_exception.cpp" />
+    <ClCompile Include="diagnostics\crashGuard.cpp" />
     <ClCompile Include="session\designerExclusivePolicy.cpp" />
     <ClCompile Include="session\session.cpp" />
     <ClCompile Include="session\sessionRegistry.cpp" />
     <ClCompile Include="session\sessionSnapshot.cpp" />
     <ClCompile Include="session\workerPoolHeadless.cpp" />
+    <ClCompile Include="lock\lockHandle.cpp" />
+    <ClCompile Include="lock\lockHolder.cpp" />
+    <ClCompile Include="lock\lockKeyHash.cpp" />
+    <ClCompile Include="lock\lockManager.cpp" />
     <ClCompile Include="backend_core.cpp" />
     <ClCompile Include="backend_mainFrame.cpp" />
     <ClCompile Include="backend_picture.cpp" />
@@ -338,13 +386,24 @@
     <ClCompile Include="compiler\value_res.cpp" />
     <ClCompile Include="databaseLayer\connectionPool.cpp" />
     <ClCompile Include="databaseLayer\connectionScope.cpp" />
+    <ClCompile Include="databaseLayer\databaseQueryBuilder.cpp" />
     <ClCompile Include="databaseLayer\databaseErrorReporter.cpp" />
     <ClCompile Include="databaseLayer\databaseLayer.cpp" />
+    <ClCompile Include="databaseLayer\databaseLayerException.cpp" />
     <ClCompile Include="databaseLayer\databaseQueryParser.cpp" />
     <ClCompile Include="databaseLayer\databaseResultSet.cpp" />
     <ClCompile Include="databaseLayer\databaseStringConverter.cpp" />
+    <ClCompile Include="databaseLayer\firebird\firebirdBlobCompression.cpp" />
+    <ClCompile Include="databaseLayer\firebird\firebirdBootstrap.cpp" />
     <ClCompile Include="databaseLayer\firebird\firebirdDatabaseLayer.cpp" />
+    <ClCompile Include="databaseLayer\firebird\firebirdHlc.cpp" />
     <ClCompile Include="databaseLayer\firebird\firebirdInterface.cpp" />
+    <ClCompile Include="databaseLayer\firebird\firebirdLeaderMode.cpp" />
+    <ClCompile Include="databaseLayer\firebird\firebirdLease.cpp" />
+    <ClCompile Include="databaseLayer\firebird\firebirdLocalServer.cpp" />
+    <ClCompile Include="databaseLayer\firebird\firebirdMaintenance.cpp" />
+    <ClCompile Include="databaseLayer\firebird\firebirdMaintenanceScheduler.cpp" />
+    <ClCompile Include="databaseLayer\firebird\firebirdReplicationConfig.cpp" />
     <ClCompile Include="databaseLayer\firebird\firebirdParameter.cpp" />
     <ClCompile Include="databaseLayer\firebird\firebirdParameterCollection.cpp" />
     <ClCompile Include="databaseLayer\firebird\firebirdPreparedStatement.cpp" />
@@ -366,6 +425,7 @@
     <ClCompile Include="databaseLayer\odbc\odbcPreparedStatement.cpp" />
     <ClCompile Include="databaseLayer\odbc\odbcResultSet.cpp" />
     <ClCompile Include="databaseLayer\odbc\odbcResultSetMetaData.cpp" />
+    <ClCompile Include="databaseLayer\postgresDialect.cpp" />
     <ClCompile Include="databaseLayer\postgres\postgresDatabaseLayer.cpp" />
     <ClCompile Include="databaseLayer\postgres\postgresInterface.cpp" />
     <ClCompile Include="databaseLayer\postgres\postgresParameter.cpp" />
@@ -413,7 +473,9 @@
     <ClCompile Include="metaCollection\metaModuleObjectMenu.cpp" />
     <ClCompile Include="metaCollection\metaModuleObjectProperty.cpp" />
     <ClCompile Include="metaCollection\metaModuleObject_res.cpp" />
+    <ClCompile Include="metaCollection\metaDiff.cpp" />
     <ClCompile Include="metaCollection\metaObject.cpp" />
+    <ClCompile Include="metaCollection\metaObjectSerialize.cpp" />
     <ClCompile Include="metaCollection\metaObjectMetadata.cpp" />
     <ClCompile Include="metaCollection\metaObjectMetadataEnum.cpp" />
     <ClCompile Include="metaCollection\metaObjectMetadataMenu.cpp" />
@@ -510,8 +572,18 @@
     <ClCompile Include="metaCollection\partial\informationRegisterMetadata_res.cpp" />
     <ClCompile Include="metaCollection\partial\informationRegisterObject.cpp" />
     <ClCompile Include="metaCollection\partial\informationRegisterQuery.cpp" />
-    <ClCompile Include="metaCollection\partial\list\listSqlBuilder.cpp" />
-    <ClCompile Include="metaCollection\partial\list\registerSqlBuilder.cpp" />
+    <ClCompile Include="query\dataQueryBuilder.cpp" />
+    <ClCompile Include="query\queryLexer.cpp" />
+    <ClCompile Include="query\queryParser.cpp" />
+    <ClCompile Include="query\queryLowering.cpp" />
+    <ClCompile Include="query\queryRewrite.cpp" />
+    <ClCompile Include="compiler\lambdaQueryAst.cpp" />
+    <ClCompile Include="query\queryableFactory.cpp" />
+    <ClCompile Include="system\value\valueQuery.cpp" />
+    <ClCompile Include="system\value\valueQueryable.cpp" />
+    <ClCompile Include="query\queryProvider.cpp" />
+    <ClCompile Include="query\dbTableProvider.cpp" />
+    <ClCompile Include="query\tempTableManager.cpp" />
     <ClCompile Include="metaCollection\partial\list\objectList.cpp" />
     <ClCompile Include="metaCollection\partial\list\objectListAction.cpp" />
     <ClCompile Include="metaCollection\partial\list\objectListModel.cpp" />
@@ -544,11 +616,12 @@
     <ClCompile Include="metadataReport.cpp" />
     <ClCompile Include="metadataReportFactory.cpp" />
     <ClCompile Include="moduleInfo.cpp" />
-    <ClCompile Include="number.cpp" />
+    <ClCompile Include="fnumber.cpp" />
     <ClCompile Include="moduleManager\moduleManager.cpp" />
     <ClCompile Include="moduleManager\moduleManagerEvent.cpp" />
     <ClCompile Include="moduleManager\moduleManagerExt.cpp" />
     <ClCompile Include="moduleManager\moduleManagerMetadataUnit.cpp" />
+    <ClCompile Include="moduleManager\moduleManagerDataUnit.cpp" />
     <ClCompile Include="moduleManager\moduleManagerUnit.cpp" />
     <ClCompile Include="objCtor.cpp" />
     <ClCompile Include="picturePredefined.cpp" />
@@ -619,10 +692,10 @@
     <ClCompile Include="typeDescription.cpp" />
     <ClCompile Include="uniqueKey.cpp" />
     <ClCompile Include="plugin\pluginManager.cpp" />
-    <ClCompile Include="plugin\pluginValue.cpp" />
     <ClCompile Include="utils\md5.cpp" />
     <ClCompile Include="utils\sha256.cpp" />
     <ClCompile Include="utils\passwordHash.cpp" />
+    <ClCompile Include="utils\dataVersion.cpp" />
     <ClCompile Include="value_cast.cpp" />
   </ItemGroup>
   <ItemGroup>
@@ -688,22 +761,67 @@
   <ItemGroup>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\firebird.conf">
       <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
+    </CopyFileToFolders>
+    <!-- Phase 6 — security5.fdb is FB's user-credentials store. The spawned
+         firebird.exe authenticates incoming TCP connects against it; without
+         it every attach fails with isc_login_error (335545106). Pre-baked
+         file from FB 5 ZIP comes with the standard SYSDBA/masterkey identity.
+         Same file for both x86 and x64 (it's just a .fdb format database). -->
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\security5.fdb" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\security5.fdb')">
+      <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
+    </CopyFileToFolders>
+    <!-- Phase 6 — local FB server (firebird.exe) for leader-mode TCP listener.
+         Vendored per-platform as firebird_x86.exe / firebird_x64.exe alongside
+         fbclient_x86/_x64.dll; each platform's build copies the matching exe
+         into _fb/ and renames to plain firebird.exe so firebirdLocalServer
+         finds it under one stable name. Items skipped when the binary isn't
+         present so the build still works without it (degrades to embedded-
+         only single-user mode). -->
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\firebird_x86.exe" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\firebird_x86.exe')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">firebird%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">firebird%(Extension)</DestinationFileName>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\firebird_x64.exe" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\firebird_x64.exe')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">firebird%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">firebird%(Extension)</DestinationFileName>
     </CopyFileToFolders>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\firebird.msg">
       <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
     </CopyFileToFolders>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\engine13_x64.dll">
       <FileType>Document</FileType>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">engine13%(Extension)</DestinationFileName>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">engine13%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">engine13%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">engine13%(Extension)</DestinationFileName>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\plugins</DestinationFolders>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
     </CopyFileToFolders>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\engine13_x86.dll">
       <FileType>Document</FileType>
@@ -711,19 +829,100 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">engine13%(Extension)</DestinationFileName>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">engine13%(Extension)</DestinationFileName>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\plugins</DestinationFolders>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">engine13%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">engine13%(Extension)</DestinationFileName>
+    </CopyFileToFolders>
+    <!-- Auth + wire-encryption + tracing plugins for spawned firebird.exe
+         server (Phase 6). Without srp/legacy_auth no SYSDBA login works;
+         without chacha wire-encryption handshake fails. Each plugin
+         vendored per-platform (x86 + x64), copied + renamed to plain
+         <name>.dll in _fb/plugins/. -->
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\srp_x86.dll" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\plugins\srp_x86.dll')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">srp%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">srp%(Extension)</DestinationFileName>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\srp_x64.dll" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\plugins\srp_x64.dll')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">srp%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">srp%(Extension)</DestinationFileName>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\chacha_x86.dll" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\plugins\chacha_x86.dll')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">chacha%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">chacha%(Extension)</DestinationFileName>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\chacha_x64.dll" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\plugins\chacha_x64.dll')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">chacha%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">chacha%(Extension)</DestinationFileName>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\legacy_auth_x86.dll" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\plugins\legacy_auth_x86.dll')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">legacy_auth%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">legacy_auth%(Extension)</DestinationFileName>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\legacy_auth_x64.dll" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\plugins\legacy_auth_x64.dll')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">legacy_auth%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">legacy_auth%(Extension)</DestinationFileName>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\legacy_usermanager_x86.dll" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\plugins\legacy_usermanager_x86.dll')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">legacy_usermanager%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">legacy_usermanager%(Extension)</DestinationFileName>
+    </CopyFileToFolders>
+    <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\plugins\legacy_usermanager_x64.dll" Condition="Exists('$(MSBuildThisFileDirectory)databaseLayer\firebird\engine\dll\plugins\legacy_usermanager_x64.dll')">
+      <FileType>Document</FileType>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
+      <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb\plugins</DestinationFolders>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">legacy_usermanager%(Extension)</DestinationFileName>
+      <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">legacy_usermanager%(Extension)</DestinationFileName>
     </CopyFileToFolders>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\fbclient_x64.dll">
       <FileType>Document</FileType>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">fbclient%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">fbclient%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">fbclient%(Extension)</DestinationFileName>
@@ -735,6 +934,10 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">fbclient%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">fbclient%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">fbclient%(Extension)</DestinationFileName>
@@ -744,6 +947,10 @@
       <FileType>Document</FileType>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ib_util%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ib_util%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">ib_util%(Extension)</DestinationFileName>
@@ -755,6 +962,10 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">false</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">ib_util%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">ib_util%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">ib_util%(Extension)</DestinationFileName>
@@ -762,44 +973,52 @@
     </CopyFileToFolders>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\intl\fbintl.conf">
       <FileType>Document</FileType>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\intl</DestinationFolders>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\intl</DestinationFolders>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\intl</DestinationFolders>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb\intl</DestinationFolders>
     </CopyFileToFolders>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\intl\fbintl_x64.dll">
       <FileType>Document</FileType>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb\intl</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">fbintl%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">fbintl%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">fbintl%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">fbintl%(Extension)</DestinationFileName>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\intl</DestinationFolders>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\intl</DestinationFolders>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb\intl</DestinationFolders>
     </CopyFileToFolders>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\intl\fbintl_x86.dll">
       <FileType>Document</FileType>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb\intl</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">fbintl%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">fbintl%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">fbintl%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|x64'">fbintl%(Extension)</DestinationFileName>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\intl</DestinationFolders>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\intl</DestinationFolders>
-      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb\intl</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb\intl</DestinationFolders>
     </CopyFileToFolders>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\icudt63l.dat">
       <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
     </CopyFileToFolders>
     <CopyFileToFolders Include="databaseLayer\firebird\engine\dll\icudt63_x64.dll">
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">icudt63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">icudt63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">icudt63%(Extension)</DestinationFileName>
@@ -809,6 +1028,10 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
       <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">icudt63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">icudt63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">icudt63%(Extension)</DestinationFileName>
@@ -818,6 +1041,10 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">icuin63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">icuin63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">icuin63%(Extension)</DestinationFileName>
@@ -827,6 +1054,10 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
       <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">icuin63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">icuin63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">icuin63%(Extension)</DestinationFileName>
@@ -836,6 +1067,10 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">true</ExcludedFromBuild>
       <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">icuuc63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">icuuc63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">icuuc63%(Extension)</DestinationFileName>
@@ -845,6 +1080,10 @@
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">true</ExcludedFromBuild>
       <ExcludedFromBuild Condition="'$(Configuration)|$(Platform)'=='Release|x64'">true</ExcludedFromBuild>
       <FileType>Document</FileType>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">$(OutDir)\_fb</DestinationFolders>
+      <DestinationFolders Condition="'$(Configuration)|$(Platform)'=='Release|x64'">$(OutDir)\_fb</DestinationFolders>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">icuuc63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">icuuc63%(Extension)</DestinationFileName>
       <DestinationFileName Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">icuuc63%(Extension)</DestinationFileName>
@@ -929,7 +1168,7 @@
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CRT_SECURE_NO_DEPRECATE=1;_CRT_NON_CONFORMING_SWPRINTFS=1;_SCL_SECURE_NO_WARNINGS=1;__WXMSW__;_UNICODE;WXUSINGDLL;_CONSOLE;%(PreprocessorDefinitions);BACKEND_EXPORTS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CRT_SECURE_NO_DEPRECATE=1;_CRT_NON_CONFORMING_SWPRINTFS=1;_SCL_SECURE_NO_WARNINGS=1;__WXMSW__;_UNICODE;WXUSINGDLL;_CONSOLE;%(PreprocessorDefinitions);BACKEND_EXPORTS;OES_FB_LOCALSERVER</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(oes3rdParty)wxWidgets\lib\vc_dll\mswud;$(oes3rdParty)wxWidgets\include;$(oesEngine);$(oesSrcDir)include;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -950,7 +1189,7 @@
       <WarningLevel>Level3</WarningLevel>
       <Optimization>Disabled</Optimization>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CRT_SECURE_NO_DEPRECATE=1;_CRT_NON_CONFORMING_SWPRINTFS=1;_SCL_SECURE_NO_WARNINGS=1;__WXMSW__;_UNICODE;WXUSINGDLL;_CONSOLE;%(PreprocessorDefinitions);BACKEND_EXPORTS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;_CRT_SECURE_NO_DEPRECATE=1;_CRT_NON_CONFORMING_SWPRINTFS=1;_SCL_SECURE_NO_WARNINGS=1;__WXMSW__;_UNICODE;WXUSINGDLL;_CONSOLE;%(PreprocessorDefinitions);BACKEND_EXPORTS;OES_FB_LOCALSERVER</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(oes3rdParty)wxWidgets\lib\vc_dll\mswud;$(oes3rdParty)wxWidgets\include;$(oesEngine);.;$(oesEngine)/core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -973,7 +1212,7 @@
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_DEPRECATE=1;_CRT_NON_CONFORMING_SWPRINTFS=1;_SCL_SECURE_NO_WARNINGS=1;__WXMSW__;NDEBUG;_UNICODE;WXUSINGDLL;_CONSOLE;BACKEND_EXPORTS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_DEPRECATE=1;_CRT_NON_CONFORMING_SWPRINTFS=1;_SCL_SECURE_NO_WARNINGS=1;__WXMSW__;NDEBUG;_UNICODE;WXUSINGDLL;_CONSOLE;BACKEND_EXPORTS;OES_FB_LOCALSERVER</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(oes3rdParty)wxWidgets\lib\vc_dll\mswu;$(oes3rdParty)wxWidgets\include;$(oesEngine);.;$(oesEngine)core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -992,10 +1231,6 @@
       <AdditionalLibraryDirectories>$(oes3rdParty)wxWidgets\lib\vc_dll;$(oesLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>wxmsw33u_aui.lib;wxmsw33u_qa.lib;wxmsw33u_html.lib;wxmsw33u_propgrid.lib;wxmsw33u_adv.lib;wxmsw33u_core.lib;wxbase33u_xml.lib;wxbase33u_net.lib;wxmsw33u_stc.lib;wxmsw33u_xrc.lib;wxbase33u.lib;wxtiffd.lib;wxjpegd.lib;wxpngd.lib;wxzlibd.lib;wxscintillad.lib;wxregexud.lib;wxexpatd.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>xcopy /Y /E /I /Q "$(SolutionDir)data\help" "$(OutDir)data\help" &gt;NUL
-xcopy /Y /E /I /Q "$(SolutionDir)lang" "$(OutDir)lang" &gt;NUL</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <ClCompile>
@@ -1004,7 +1239,7 @@ xcopy /Y /E /I /Q "$(SolutionDir)lang" "$(OutDir)lang" &gt;NUL</Command>
       <FunctionLevelLinking>true</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_DEPRECATE=1;_CRT_NON_CONFORMING_SWPRINTFS=1;_SCL_SECURE_NO_WARNINGS=1;__WXMSW__;NDEBUG;_UNICODE;WXUSINGDLL;_CONSOLE;BACKEND_EXPORTS</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_CRT_SECURE_NO_DEPRECATE=1;_CRT_NON_CONFORMING_SWPRINTFS=1;_SCL_SECURE_NO_WARNINGS=1;__WXMSW__;NDEBUG;_UNICODE;WXUSINGDLL;_CONSOLE;BACKEND_EXPORTS;OES_FB_LOCALSERVER</PreprocessorDefinitions>
       <ConformanceMode>false</ConformanceMode>
       <PrecompiledHeader>NotUsing</PrecompiledHeader>
       <AdditionalIncludeDirectories>$(oes3rdParty)wxWidgets\lib\vc_dll\mswu;$(oes3rdParty)wxWidgets\include;$(oesEngine);.;$(oesEngine)/core;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
@@ -1024,13 +1259,37 @@ xcopy /Y /E /I /Q "$(SolutionDir)lang" "$(OutDir)lang" &gt;NUL</Command>
       <AdditionalLibraryDirectories>$(oes3rdParty)wxWidgets\lib\vc_x64_dll;$(oesLibDir);%(AdditionalLibraryDirectories)</AdditionalLibraryDirectories>
       <AdditionalDependencies>wxmsw33u_aui.lib;wxmsw33u_qa.lib;wxmsw33u_html.lib;wxmsw33u_propgrid.lib;wxmsw33u_adv.lib;wxmsw33u_core.lib;wxbase33u_xml.lib;wxbase33u_net.lib;wxmsw33u_stc.lib;wxmsw33u_xrc.lib;wxbase33u.lib;wxtiffd.lib;wxjpegd.lib;wxpngd.lib;wxzlibd.lib;wxscintillad.lib;wxregexud.lib;wxexpatd.lib;%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
-    <PostBuildEvent>
-      <Command>xcopy /Y /E /I /Q "$(SolutionDir)data\help" "$(OutDir)data\help" &gt;NUL
-xcopy /Y /E /I /Q "$(SolutionDir)lang" "$(OutDir)lang" &gt;NUL</Command>
-    </PostBuildEvent>
   </ItemDefinitionGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
     <Import Project="$(VCTargetsPath)\BuildCustomizations\masm.targets" />
   </ImportGroup>
+  <!--
+    Syntax-helper content stage. Pack syntaxHelper\(locale)\*.json into
+    $(OutDir)help\(locale).hlk (zip, DEFLATE) so the runtime locator
+    finds one file per locale next to the exe in production. Source-of-
+    truth is $(SolutionDir)syntaxHelper; dev runs read from there
+    directly via the walk-up fallback in ibHelpService::ResolvePlatformDir
+    (loader's ResolveSource picks zip when present, dir otherwise).
+
+    PowerShell Compress-Archive is preferred over tar.exe because tar
+    with the "-C dir ." form prefixes every entry with "./", which the
+    wxZipInputStream-side parser handles non-trivially (asserts on
+    debug builds for the bare "./" dir marker). Compress-Archive
+    writes entries as bare leaf names without that prefix and without
+    a directory entry. -Force overwrites; the .pack-stamp.txt sentinel
+    drives MSBuild Inputs/Outputs so the Target re-runs only when
+    source JSON or build-tree state changed.
+  -->
+  <Target Name="StageSyntaxHelperContent" AfterTargets="Build"
+          Inputs="$(SolutionDir)syntaxHelper\**\*.json"
+          Outputs="$(OutDir)help\.pack-stamp.txt">
+    <MakeDir Directories="$(OutDir)help" />
+    <ItemGroup>
+      <SyntaxHelperLocales Include="$([System.IO.Directory]::GetDirectories('$(SolutionDir)syntaxHelper'))" />
+    </ItemGroup>
+    <Exec Command="powershell -NoProfile -ExecutionPolicy Bypass -Command &quot;Add-Type -A 'System.IO.Compression.FileSystem'; if (Test-Path '$(OutDir)help\%(SyntaxHelperLocales.Filename).hlk') { Remove-Item '$(OutDir)help\%(SyntaxHelperLocales.Filename).hlk' -Force }; [IO.Compression.ZipFile]::CreateFromDirectory('%(SyntaxHelperLocales.FullPath)', '$(OutDir)help\%(SyntaxHelperLocales.Filename).hlk', 'Optimal', 0)&quot;"
+          WorkingDirectory="$(SolutionDir)" />
+    <Touch Files="$(OutDir)help\.pack-stamp.txt" AlwaysCreate="true" />
+  </Target>
 </Project>

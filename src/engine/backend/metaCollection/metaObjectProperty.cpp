@@ -27,7 +27,6 @@ bool ibValueMetaObject::OnPropertyChanging(ibProperty* property, const wxVariant
 
 #include "backend/backend_mainFrame.h"
 #include "backend/appData.h"
-#include "backend/plugin/pluginManager.h"
 #include "backend/session/session.h"
 
 void ibValueMetaObject::OnPropertyChanged(ibProperty* property, const wxVariant& oldValue, const wxVariant& newValue)
@@ -41,6 +40,4 @@ void ibValueMetaObject::OnPropertyChanged(ibProperty* property, const wxVariant&
 		if (auto* frame = ibSession::CurrentFrame())
 			frame->RefreshFrame();
 	}
-	if (auto* pm = appData->GetPluginManager())
-		pm->FireEvent(wxT("MetadataMutated"));
 }

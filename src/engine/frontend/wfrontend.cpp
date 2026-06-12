@@ -14,7 +14,6 @@
 #include <vector>
 
 #include <wx/bitmap.h>
-#include <wx/filename.h>
 #include <wx/image.h>
 #include <wx/imagpng.h>
 #include <wx/mstream.h>
@@ -24,7 +23,6 @@
 #include "backend/session/session.h"
 #include "backend/session/sessionRegistry.h"
 #include "backend/backend_exception.h"
-#include "backend/utils/configLock.hpp"
 #include "backend/databaseLayer/connectionHolder.h"
 #include "backend/databaseLayer/connectionPool.h"
 #include "backend/databaseLayer/databaseLayer.h"
@@ -61,7 +59,6 @@ namespace {
 // even after the session itself was evicted (in which case /session
 // returns the unauthenticated stub but still carries the current gen).
 std::atomic<std::uint64_t> g_metaGeneration{ 1 };
-std::string g_configDir;
 
 class SessionManager {
 public:
@@ -314,14 +311,6 @@ private:
 		wxString lastObservedMetaGuid;
 		if (activeMetaData != nullptr)
 			lastObservedMetaGuid = activeMetaData->GetConfigGuid().str();
-		std::int64_t lastObservedMcpSeq = 0;
-		if (!g_configDir.empty()) {
-			ibConfigLock::MutationMarker marker;
-			if (ibConfigLock::ReadMutationMarker(
-					wxString::FromUTF8(g_configDir.c_str()), marker)) {
-				lastObservedMcpSeq = marker.seq;
-			}
-		}
 
 		for (;;) {
 			{
@@ -367,13 +356,7 @@ private:
 			//    pool hands back nullptr — we simply skip the tick.
 			CheckMetadataAndEvict(lastObservedMetaGuid);
 
-			// 3) MCP mutation marker watch. oes-mcp writes this marker
-			//    after meta_create/edit/delete/write_module/save_config.
-			//    file_guid may not change for every draft-level mutation,
-			//    so this gives the web runtime a fast invalidation path.
-			CheckMcpMutationAndEvict(lastObservedMcpSeq);
-
-			// 4) Admin-driven "reload" signal. `JobCheckSignal` on the
+			// 3) Admin-driven "reload" signal. `JobCheckSignal` on the
 			//    registry thread latches a flag when an admin writes
 			//    signal='reload' to any own row; we consume it here
 			//    (one-shot) and evict every user session just like the
@@ -385,73 +368,15 @@ private:
 			if (reloadReg != nullptr && reloadReg->ConsumeReloadRequest()) {
 				std::cerr << "[signal] reload directive — evicting "
 				          << "all user sessions" << std::endl;
-				EvictAllSessions();
+				std::vector<std::string> ids;
+				{
+					std::lock_guard<std::mutex> lock(m_mutex);
+					ids.reserve(m_sessions.size());
+					for (auto& kv : m_sessions) ids.push_back(kv.first);
+				}
+				for (const std::string& id : ids) Destroy(id);
 			}
 		}
-	}
-
-	void EvictAllSessions()
-	{
-		std::vector<std::string> ids;
-		{
-			std::lock_guard<std::mutex> lock(m_mutex);
-			ids.reserve(m_sessions.size());
-			for (auto& kv : m_sessions) ids.push_back(kv.first);
-		}
-		for (const std::string& id : ids) Destroy(id);
-	}
-
-	void ReloadMetadata(const char* source)
-	{
-		if (activeMetaData == nullptr) return;
-		try {
-			if (!activeMetaData->CloseDatabase(forceCloseFlag)) {
-				std::cerr << "[" << source
-				          << "] CloseDatabase FAILED — server restart required"
-				          << std::endl;
-			}
-			else if (!activeMetaData->LoadDatabase()) {
-				std::cerr << "[" << source
-				          << "] LoadDatabase FAILED — server restart required"
-				          << std::endl;
-			}
-			else if (!activeMetaData->RunDatabase()) {
-				std::cerr << "[" << source
-				          << "] RunDatabase FAILED — server restart required"
-				          << std::endl;
-			}
-			else {
-				std::cerr << "[" << source
-				          << "] recompile OK; next login picks up new config"
-				          << std::endl;
-			}
-		}
-		catch (...) {
-			std::cerr << "[" << source
-			          << "] reload threw — server restart required"
-			          << std::endl;
-		}
-	}
-
-	void CheckMcpMutationAndEvict(std::int64_t& lastObservedSeq)
-	{
-		if (g_configDir.empty()) return;
-		ibConfigLock::MutationMarker marker;
-		if (!ibConfigLock::ReadMutationMarker(
-				wxString::FromUTF8(g_configDir.c_str()), marker)) {
-			return;
-		}
-		if (marker.seq <= 0 || marker.seq == lastObservedSeq) return;
-		lastObservedSeq = marker.seq;
-
-		std::cerr << "[mcp] mutation marker seq=" << marker.seq
-		          << " tool=" << marker.tool
-		          << " fullName=" << marker.fullName
-		          << " — evicting all user sessions + reloading compile"
-		          << std::endl;
-		g_metaGeneration.fetch_add(1, std::memory_order_relaxed);
-		EvictAllSessions();
-		ReloadMetadata("mcp");
 	}
 
 	// Poll sys_config.file_guid against the observed guid. If changed,
@@ -502,7 +427,18 @@ private:
 		// follows doesn't itself carry a distinct error code.
 		g_metaGeneration.fetch_add(1, std::memory_order_relaxed);
 
-		EvictAllSessions();
+		// Evict every user session. Each HTTP request made afterwards
+		// hits "unknown cookie → 401" and the client UI prompts for
+		// re-login. Destroy runs OnExit → StopWorker (joins the
+		// session's worker thread) so by the time the loop returns,
+		// no session-scope runtime is live — safe to swap compile.
+		std::vector<std::string> ids;
+		{
+			std::lock_guard<std::mutex> lock(m_mutex);
+			ids.reserve(m_sessions.size());
+			for (auto& kv : m_sessions) ids.push_back(kv.first);
+		}
+		for (const std::string& id : ids) Destroy(id);
 
 		// Server-side recompile against the freshly-deployed config.
 		//   CloseDatabase(forceCloseFlag) — runs OnBefore/After-CloseMetaObject
@@ -526,7 +462,25 @@ private:
 		//                                   this finishes with a fresh
 		//                                   compile and the next login
 		//                                   spins runtime up on it.
-		ReloadMetadata("metadata");
+		if (activeMetaData != nullptr) {
+			try {
+				if (!activeMetaData->CloseDatabase(forceCloseFlag)) {
+					std::cerr << "[metadata] CloseDatabase FAILED — server restart required" << std::endl;
+				}
+				else if (!activeMetaData->LoadDatabase()) {
+					std::cerr << "[metadata] LoadDatabase FAILED — server restart required" << std::endl;
+				}
+				else if (!activeMetaData->RunDatabase()) {
+					std::cerr << "[metadata] RunDatabase FAILED — server restart required" << std::endl;
+				}
+				else {
+					std::cerr << "[metadata] recompile OK; next login picks up new config" << std::endl;
+				}
+			}
+			catch (...) {
+				std::cerr << "[metadata] reload threw — server restart required" << std::endl;
+			}
+		}
 	}
 
 	mutable std::mutex m_mutex;
@@ -561,16 +515,6 @@ std::string       g_lastError;
 // cookie session is registered.
 std::mutex        g_addrMutex;
 std::string       g_serverAddress;
-
-std::string ConfigDirFromFilePath(const std::string& filePath)
-{
-	wxFileName fn(wxString::FromUTF8(filePath.c_str()));
-	const wxString name = fn.GetFullName().Lower();
-	if (name == wxT("sys.fdb")) {
-		return std::string(fn.GetPath().utf8_str());
-	}
-	return filePath;
-}
 
 void RememberError()
 {
@@ -671,7 +615,6 @@ WFRONTEND_API bool wfrontendInitFile(
 	if (!FinishConnect(ibUser, ibPassword))
 		return false;
 
-	g_configDir = ConfigDirFromFilePath(filePath);
 	g_initialized.store(true);
 	return true;
 }
@@ -711,7 +654,6 @@ WFRONTEND_API bool wfrontendInitServer(
 	if (!FinishConnect(ibUser, ibPassword))
 		return false;
 
-	g_configDir.clear();
 	g_initialized.store(true);
 	return true;
 }
@@ -849,7 +791,6 @@ WFRONTEND_API void wfrontendShutdown()
 	Sessions().StopSweep();
 	Sessions().Clear();
 	appDataDestroy();
-	g_configDir.clear();
 	g_lastError.clear();
 }
 

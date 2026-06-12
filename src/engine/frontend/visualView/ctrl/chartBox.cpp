@@ -126,7 +126,7 @@ wxObject* ibValueChartBox::Create(wxWindow* wxparent, ibVisualHost *visualHost)
 	return m_chartBox;
 }
 
-void ibValueChartBox::OnCreated(wxObject* wxobject, wxWindow* wxparent, ibVisualHost *visualHost, bool firstCreated)
+void ibValueChartBox::OnCreated(wxObject* wxobject, wxWindow* wxparent, ibVisualHost *visualHost, bool firstСreated)
 {
 	wxWindow *m_chartBox = dynamic_cast<wxWindow *>(wxobject);
 }

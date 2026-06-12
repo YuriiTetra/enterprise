@@ -112,7 +112,7 @@ wxObject* ibValueModelTableBoxColumn::Create(ibFrontendWindow* wxparent, ibVisua
 #endif
 }
 
-void ibValueModelTableBoxColumn::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost* visualHost, bool firstCreated)
+void ibValueModelTableBoxColumn::OnCreated(wxObject* wxobject, ibFrontendWindow* wxparent, ibVisualHost* visualHost, bool firstСreated)
 {
 #ifndef OES_USE_WEB
 	ibDataViewCtrl* dataViewCtrl = dynamic_cast<ibDataViewCtrl*>(wxparent);
