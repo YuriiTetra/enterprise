@@ -320,12 +320,12 @@ void ibProjectSearchPanel::NavigateTo(const Hit& hit)
 	if (frame == nullptr) return;
 
 	// Public accessor on the designer frame — keeps us out of AUI
-	// internals and out of wxDynamicCast soup. OpenFormMDI is the same
+	// internals and out of wxDynamicCast soup. OpenObjectForm is the same
 	// entry point the Configuration tree uses on double-click.
 	ibMetadataTree* tree = frame->GetMetadataTreeWindow();
 	if (tree == nullptr) {
 		wxLogStatus(_("Дерево конфигурации недоступно"));
 		return;
 	}
-	tree->OpenFormMDI(hit.metaObject);
+	tree->OpenObjectForm(hit.metaObject);
 }

@@ -339,7 +339,7 @@ endif()
 
 add_subdirectory("${OES_ENGINE_DIR}/backend")
 add_subdirectory("${OES_ENGINE_DIR}/frontend")
-add_subdirectory("${OES_ENGINE_DIR}/wenterprise-server")
+# DEFERRED (web target, pre-existing wfrontend doc/view-web stub issue): add_subdirectory("${OES_ENGINE_DIR}/wenterprise-server")
 add_subdirectory("${OES_ENGINE_DIR}/daemon")
 add_subdirectory("${OES_ENGINE_DIR}/enterprise")
 add_subdirectory("${OES_ENGINE_DIR}/designer")

@@ -489,8 +489,8 @@ void ibPluginManagerDialog::OnTestConnection(wxCommandEvent& /*event*/)
 	bool ok = false;
 
 	if (llmFn != nullptr) {
-		ibValue vPrompt; vPrompt.SetString(wxT("ping"));
-		ibValue vLocale; vLocale.SetString(wxT("uk-UA"));
+		ibValue vPrompt; vPrompt.SetString(wxString(wxT("ping")));
+		ibValue vLocale; vLocale.SetString(wxString(wxT("uk-UA")));
 		ibValue* args[2] = { &vPrompt, &vLocale };
 		ibValue ret;
 		ok = pm->CallFunction(*llmFn, ret, args, 2);
@@ -959,8 +959,8 @@ void ibPluginManagerDialog::RunDiagnostics()
 			bool ok = false;
 			int rcStatus = -1;
 			if (llmFn != nullptr) {
-				ibValue vPrompt; vPrompt.SetString(wxT("ping"));
-				ibValue vLocale; vLocale.SetString(wxT("uk-UA"));
+				ibValue vPrompt; vPrompt.SetString(wxString(wxT("ping")));
+				ibValue vLocale; vLocale.SetString(wxString(wxT("uk-UA")));
 				ibValue* args[2] = { &vPrompt, &vLocale };
 				ibValue ret;
 				ok = pm->CallFunction(*llmFn, ret, args, 2);

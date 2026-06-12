@@ -326,6 +326,19 @@ public:
 
 	wxString GetComputerName() const { return m_strComputer; }
 	const wxString& GetFileDirectory() const { return m_strFile; } // config working dir (file mode)
+	// Designer data-write guard — ported from the syntax-helper track. The
+	// template wizard / agent appliers flip this thread-local so a Designer-mode
+	// write goes to the DB instead of being suppressed.
+	static bool DesignerDataWriteEnabled();
+	class ScopedDesignerDataWrite {
+	public:
+		ScopedDesignerDataWrite();
+		~ScopedDesignerDataWrite();
+	private:
+		bool m_previous = false;
+	};
+	// Help corpus convenience — delegates to the help service (null-safe).
+	std::shared_ptr<const class ibHelpCorpus> GetHelpCorpus() const;
 
 	wxString GetLocale() const { return m_locale.GetCanonicalName(); }
 
